@@ -69,6 +69,11 @@ export function textoCarta(tipo) {
 const LOGO_URL = 'https://carbat.com.br/wp-content/uploads/2024/06/Carbat-logo-sem-fundo--e1746032537163.png'
 const BLUE     = '#1565c0'
 
+// Dimensões do logo controladas em um único lugar.
+// Altere LOGO_W / LOGO_H para ajustar a proporção se necessário.
+const LOGO_W = 160   // px – largura no documento
+const LOGO_H = 40    // px – altura no documento
+
 // ─── helpers internos de HTML ─────────────────────────────────────────────────
 
 function _esc(s) {
@@ -89,11 +94,24 @@ function _secao(num, titulo, conteudo) {
     </div>`
 }
 
+/**
+ * _miniHeader
+ *
+ * FIX: O Word (MSO) ignora "height" com "width:auto" em imagens externas e
+ * renderiza no tamanho intrínseco da imagem. Solução:
+ *   1. Definir AMBOS width e height no atributo style (sem "auto").
+ *   2. Espelhar os mesmos valores nos atributos HTML width/height.
+ *      O Word prioriza atributos HTML para dimensionamento.
+ *   3. Adicionar max-width como camada extra de proteção.
+ */
 function _miniHeader() {
   return `
     <div style="display:flex;align-items:flex-end;justify-content:space-between;
                 border-bottom:1px solid #ccc;padding-bottom:12px;margin-bottom:20px;">
-      <img src="${LOGO_URL}" style="height:40px;width:auto;object-fit:contain;">
+      <img src="${LOGO_URL}"
+           width="${LOGO_W}"
+           height="${LOGO_H}"
+           style="width:${LOGO_W}px;height:${LOGO_H}px;max-width:${LOGO_W}px;object-fit:contain;display:block;">
       <div style="text-align:right;font-size:9px;color:#aaa;line-height:1.5;">
         Documento Oficial<br>Carbat do Brasil
       </div>

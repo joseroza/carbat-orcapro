@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Pencil, Trash2, Search } from 'lucide-react'
+import { Plus, Pencil, Trash2, Search, CheckCircle, XCircle } from 'lucide-react'
 import { api } from '../api/api'
 import {
   PageHeader, Card, Button, Modal, FormField, Input, Table, Spinner
@@ -7,14 +7,15 @@ import {
 
 const EMPTY = {
   razao_social: '', nome_fantasia: '', cnpj: '', email: '',
-  telefone: '', endereco: '', cidade: '', estado: '', contato_principal: ''
+  telefone: '', endereco: '', cidade: '', estado: '', contato_principal: '',
+  aprovado: null
 }
 
 export default function ClientesPage() {
   const [clientes, setClientes] = useState([])
   const [loading, setLoading]   = useState(true)
   const [search, setSearch]     = useState('')
-  const [modal, setModal]       = useState(null) // null | { mode, data }
+  const [modal, setModal]       = useState(null)
   const [saving, setSaving]     = useState(false)
   const [form, setForm]         = useState(EMPTY)
 
@@ -43,6 +44,17 @@ export default function ClientesPage() {
     await api.clientes.delete(id); load()
   }
 
+  // Alterna aprovado → reprovado → aprovado (null vira aprovado na primeira vez)
+  const toggleAprovado = async (cliente) => {
+    const novoStatus = cliente.aprovado === true ? false : true
+    try {
+      await api.clientes.update(cliente.id, { ...cliente, aprovado: novoStatus })
+      setClientes(prev =>
+        prev.map(c => c.id === cliente.id ? { ...c, aprovado: novoStatus } : c)
+      )
+    } catch (e) { alert(e.message) }
+  }
+
   const filtered = clientes.filter(c =>
     (c.razao_social + c.nome_fantasia + c.cnpj + c.cidade).toLowerCase()
       .includes(search.toLowerCase())
@@ -69,7 +81,7 @@ export default function ClientesPage() {
 
         {loading ? <Spinner /> : (
           <Table
-            headers={['Razão Social', 'Nome Fantasia', 'CNPJ', 'Cidade/UF', 'Contato', '']}
+            headers={['Razão Social', 'Nome Fantasia', 'CNPJ', 'Cidade/UF', 'Contato', 'Status', '']}
             empty={filtered.length === 0 ? 'Nenhum cliente encontrado' : ''}
           >
             {filtered.map(c => (
@@ -79,6 +91,32 @@ export default function ClientesPage() {
                 <td className="py-3 px-4 text-slate-600 font-mono text-xs">{c.cnpj || '—'}</td>
                 <td className="py-3 px-4 text-slate-600">{c.cidade ? `${c.cidade}/${c.estado}` : '—'}</td>
                 <td className="py-3 px-4 text-slate-600">{c.contato_principal || '—'}</td>
+                <td className="py-3 px-4">
+                  <button
+                    onClick={() => toggleAprovado(c)}
+                    title={c.aprovado === true ? 'Clique para reprovar' : c.aprovado === false ? 'Clique para aprovar' : 'Clique para definir status'}
+                    className="flex items-center gap-1.5 transition-opacity hover:opacity-75"
+                  >
+                    {c.aprovado === true && (
+                      <>
+                        <CheckCircle size={16} className="text-green-500 flex-shrink-0" />
+                        <span className="text-xs font-semibold text-green-600">Aprovado</span>
+                      </>
+                    )}
+                    {c.aprovado === false && (
+                      <>
+                        <XCircle size={16} className="text-red-500 flex-shrink-0" />
+                        <span className="text-xs font-semibold text-red-600">Reprovado</span>
+                      </>
+                    )}
+                    {(c.aprovado === null || c.aprovado === undefined) && (
+                      <>
+                        <div className="w-4 h-4 rounded-full border-2 border-slate-300 flex-shrink-0" />
+                        <span className="text-xs text-slate-400">Pendente</span>
+                      </>
+                    )}
+                  </button>
+                </td>
                 <td className="py-3 px-4">
                   <div className="flex gap-1 justify-end">
                     <Button variant="ghost" size="sm" onClick={() => openEdit(c)}><Pencil size={14} /></Button>

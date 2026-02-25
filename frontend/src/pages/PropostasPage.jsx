@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Pencil, Trash2, Search, X, ChevronDown, ChevronUp, FileText, FileDown } from 'lucide-react'
+import { Plus, Pencil, Trash2, Search, X, ChevronDown, ChevronUp, FileText, FileDown, AlertTriangle } from 'lucide-react'
 import { api } from '../api/api'
 import { PageHeader, Card, Table, Spinner, Badge } from '../components/ui'
 import { gerarPDF, gerarDOCX, fmtDateDisplay, buildFilename } from '../utils/gerarProposta'
@@ -101,7 +101,6 @@ const PAGAMENTO_OPTS = [
   { value:'OUTRO',                                                label:'-- Adicionar outra forma --' },
 ]
 
-// Gera texto de reajuste com mês/ano atual
 function reajusteAtual() {
   const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
   const now = new Date()
@@ -111,7 +110,7 @@ function reajusteAtual() {
 const EMPTY_FORM = {
   numero:'',revisao:'1.0',cliente_id:'',cliente_nome:'',contato:'',referencia:'',
   data_proposta:'',titulo:'',tipo_fornecimento:'fornecimento e fabricação',
-  status:'rascunho',tipo_proposta:'comercial',valor_total:0,observacoes:'',
+  status:'rascunho',valor_total:0,observacoes:'',
   reajuste:reajusteAtual(),
   impostos:{icms:true,icms_val:'17',ipi:false,ipi_val:'',pis:true,pis_val:'0.65',cofins:true,cofins_val:'3.00',iss:false,iss_val:'',ncm:'73089010',cod_servico:''},
   pagamento:'30 DDL, após a emissão da Notas Fiscal.',pagamento_personalizado:'',
@@ -209,6 +208,14 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   const isEdit = modal.mode === 'edit'
 
+  // Apenas clientes aprovados podem ser selecionados
+  const clientesAprovados = clientes.filter(c => c.aprovado === true)
+
+  // Se editando, verifica se o cliente atual ainda está aprovado
+  const clienteAtualReprovado = isEdit
+    && form.cliente_nome
+    && clientes.some(c => c.razao_social === form.cliente_nome && c.aprovado === false)
+
   const set    = (k,v) => setForm(f=>({...f,[k]:v}))
   const setImp = (k,v) => setForm(f=>({...f,impostos:{...f.impostos,[k]:v}}))
   const toggleCheck = (field,val) => setForm(f=>({...f,[field]:f[field].includes(val)?f[field].filter(x=>x!==val):[...f[field],val]}))
@@ -222,6 +229,17 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
   const addDoc     = () => setForm(f=>({...f,documentos:[...f.documentos,'']}))
   const removeDoc  = (i) => setForm(f=>({...f,documentos:f.documentos.filter((_,idx)=>idx!==i)}))
   const setDoc     = (i,v) => setForm(f=>({...f,documentos:f.documentos.map((x,idx)=>idx===i?v:x)}))
+
+  // Seleciona cliente pelo id, preenchendo nome automaticamente
+  const handleClienteChange = (id) => {
+    const cliente = clientesAprovados.find(c => c.id === id)
+    setForm(f => ({
+      ...f,
+      cliente_id: id,
+      cliente_nome: cliente ? cliente.razao_social : '',
+      contato: cliente?.contato_principal || f.contato,
+    }))
+  }
 
   function serializeImpostos(imp) {
     const parts=[]
@@ -237,6 +255,20 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
 
   const save = async () => {
     if (!form.titulo.trim()) return alert('Título é obrigatório')
+
+    // Bloqueia salvamento se cliente estiver reprovado
+    if (clienteAtualReprovado) {
+      return alert('Não é possível salvar uma proposta para um cliente reprovado. Altere o cliente antes de continuar.')
+    }
+
+    // Valida que o cliente selecionado é aprovado
+    if (form.cliente_nome) {
+      const clienteEncontrado = clientes.find(c => c.razao_social === form.cliente_nome)
+      if (clienteEncontrado && clienteEncontrado.aprovado !== true) {
+        return alert('Selecione um cliente aprovado para criar a proposta.')
+      }
+    }
+
     setSaving(true)
     try {
       const revisao = isEdit ? bumpRevisao(form.revisao) : form.revisao
@@ -279,14 +311,46 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"><X size={20}/></button>
         </div>
 
+        {/* Aviso de cliente reprovado (modo edição) */}
+        {clienteAtualReprovado && (
+          <div className="mx-5 mt-4 flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+            <AlertTriangle size={18} className="text-red-500 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-red-700">Cliente reprovado</p>
+              <p className="text-xs text-red-600 mt-0.5">
+                O cliente <strong>{form.cliente_nome}</strong> foi reprovado após a criação desta proposta.
+                Para salvar alterações, selecione um cliente aprovado.
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="p-5">
           {/* Cabeçalho */}
           <Section title="Cabeçalho da Proposta">
             <div className="grid grid-cols-2 gap-4">
+
+              {/* ── Campo Contratante: apenas clientes aprovados ── */}
               <Field label="Contratante">
-                <input className={inp} value={form.cliente_nome} onChange={e=>set('cliente_nome',e.target.value)} list="cl-list" placeholder="Ex: Brasil ao Cubo"/>
-                <datalist id="cl-list">{clientes.map(c=><option key={c.id} value={c.razao_social}/>)}</datalist>
+                {clientesAprovados.length === 0 ? (
+                  <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    <AlertTriangle size={14} className="text-amber-500 flex-shrink-0" />
+                    <span className="text-xs text-amber-700">Nenhum cliente aprovado cadastrado. Aprove um cliente primeiro.</span>
+                  </div>
+                ) : (
+                  <select
+                    className={sel}
+                    value={form.cliente_id || ''}
+                    onChange={e => handleClienteChange(e.target.value)}
+                  >
+                    <option value="">Selecione um cliente aprovado...</option>
+                    {clientesAprovados.map(c => (
+                      <option key={c.id} value={c.id}>{c.razao_social}{c.nome_fantasia ? ` — ${c.nome_fantasia}` : ''}</option>
+                    ))}
+                  </select>
+                )}
               </Field>
+
               <Field label="A/C (Contato)">
                 <input className={inp} value={form.contato} onChange={e=>set('contato',e.target.value)} placeholder="Nome do responsável"/>
               </Field>
@@ -317,19 +381,7 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
                   {STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}
                 </select>
               </Field>
-              <Field label="Tipo de Proposta" full>
-                <div className="flex gap-3">
-                  {[{v:'comercial',label:'📄 Proposta Comercial',desc:'Preços, condições e escopo comercial'},{v:'tecnica',label:'🔧 Proposta Técnica',desc:'Especificações e soluções técnicas'}].map(opt=>(
-                    <label key={opt.v} className={`flex-1 flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${form.tipo_proposta===opt.v?'border-blue-500 bg-blue-50':'border-slate-200 bg-white hover:border-slate-300'}`}>
-                      <input type="radio" className="mt-0.5 accent-blue-600" name="tipo_proposta" value={opt.v} checked={form.tipo_proposta===opt.v} onChange={()=>set('tipo_proposta',opt.v)}/>
-                      <div>
-                        <p className={`text-sm font-semibold ${form.tipo_proposta===opt.v?'text-blue-700':'text-slate-700'}`}>{opt.label}</p>
-                        <p className="text-xs text-slate-400 mt-0.5">{opt.desc}</p>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </Field>
+
             </div>
             {(form.numero||form.cliente_nome||form.titulo)&&(
               <div className="mt-4 bg-slate-800 rounded-lg px-4 py-3">
@@ -505,8 +557,8 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
         {/* footer */}
         <div className="flex justify-end gap-3 p-5 border-t bg-slate-50 rounded-b-2xl sticky bottom-0">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100 transition-colors">Cancelar</button>
-          <button type="button" onClick={save} disabled={saving}
-            className="px-6 py-2 text-sm rounded-lg bg-blue-700 text-white font-bold hover:bg-blue-800 disabled:opacity-50 transition-colors uppercase tracking-wide">
+          <button type="button" onClick={save} disabled={saving || clienteAtualReprovado}
+            className="px-6 py-2 text-sm rounded-lg bg-blue-700 text-white font-bold hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors uppercase tracking-wide">
             {saving?'Salvando...':isEdit?`Salvar (Rev. ${nextRev})`:'Criar Proposta'}
           </button>
         </div>
@@ -529,7 +581,14 @@ export default function PropostasPage() {
   }
   useEffect(()=>{ load() },[])
 
-  const openNew  = () => setModal({ mode:'new', form:{ ...EMPTY_FORM, data_proposta:new Date().toISOString().split('T')[0] } })
+  const openNew = () => {
+    const clientesAprovados = clientes.filter(c => c.aprovado === true)
+    if (clientesAprovados.length === 0) {
+      return alert('Não há clientes aprovados. Acesse a tela de Clientes e aprove um cliente antes de criar uma proposta.')
+    }
+    setModal({ mode:'new', form:{ ...EMPTY_FORM, data_proposta:new Date().toISOString().split('T')[0] } })
+  }
+
   const openEdit = (p) => setModal({ mode:'edit', id:p.id, form:buildForm(p) })
   const close    = () => setModal(null)
   const del = async (id) => {
@@ -537,7 +596,6 @@ export default function PropostasPage() {
     await api.propostas.delete(id); load()
   }
 
-  // Atualiza só o status, sem gerar nova revisão
   const updateStatus = async (proposta, novoStatus) => {
     try {
       await api.propostas.update(proposta.id, { ...proposta, status: novoStatus })
@@ -571,18 +629,13 @@ export default function PropostasPage() {
 
         {loading ? <Spinner/> : (
           <Table
-            headers={['Número / Rev.','Tipo','Título','Cliente','Valor Total','Status','Data','']}
+            headers={['Número / Rev.','Título','Cliente','Valor Total','Status','Data','']}
             empty={filtered.length===0?'Nenhuma proposta encontrada':''}
           >
             {filtered.map(p=>(
               <tr key={p.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
                 <td className="py-3 px-4 text-xs font-mono text-slate-600">
                   {p.numero||'—'}<span className="ml-1 text-slate-400">Rev.{p.revisao}</span>
-                </td>
-                <td className="py-3 px-4">
-                  <span className={`text-xs font-medium px-2 py-1 rounded-full ${p.tipo_proposta==='tecnica'?'bg-orange-100 text-orange-700':'bg-blue-100 text-blue-700'}`}>
-                    {p.tipo_proposta==='tecnica'?'Técnica':'Comercial'}
-                  </span>
                 </td>
                 <td className="py-3 px-4 font-medium text-slate-800 max-w-xs truncate">{p.titulo}</td>
                 <td className="py-3 px-4 text-slate-600 text-sm">{p.cliente_nome||'—'}</td>
