@@ -1,52 +1,44 @@
 /**
  * gerarProposta.js
- * Utilitário de exportação de Propostas Comerciais da Carbat.
+ * Exportação de Propostas Comerciais – Carbat
  *
- * Exporta:
  *   gerarPDF(form)   → abre janela de impressão/PDF no navegador
- *   gerarDOCX(form)  → baixa arquivo .docx usando a lib `docx`
+ *   gerarDOCX(form)  → baixa .doc (HTML-Word) com a mesma estrutura do PDF
  *
- * Dependência (adicionar ao package.json do frontend):
- *   npm install docx
+ * Estrutura do documento:
+ *   Pág 1 – Carta de apresentação (logo, dados, assinaturas)
+ *   Pág 2 – Proposta Comercial   (itens + condições comerciais)
+ *   Pág 3 – Proposta Técnica     (escopo, tratamento, databook…)
  */
 
-import {
-  Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
-  ImageRun, AlignmentType, WidthType, BorderStyle, ShadingType,
-  VerticalAlign, PageBreak, LevelFormat, UnderlineType,
-} from 'docx'
-
-// ─── helpers compartilhados ───────────────────────────────────────────────────
+// ─── helpers exportados (usados em PropostasPage) ─────────────────────────────
 
 export function parseDate(val) {
   if (!val) return ''
   if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val
   if (val.includes('T')) return val.split('T')[0]
-  if (/^\d{2}\/\d{2}\/\d{4}$/.test(val)) { const [d,m,y]=val.split('/'); return `${y}-${m}-${d}` }
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(val)) {
+    const [d, m, y] = val.split('/'); return `${y}-${m}-${d}`
+  }
   return ''
 }
 
 export function fmtDateDisplay(val) {
   const d = parseDate(val); if (!d) return '—'
-  const [y,m,day] = d.split('-'); return `${day}/${m}/${y}`
+  const [y, m, day] = d.split('-'); return `${day}/${m}/${y}`
 }
 
 export function arrToText(arr) {
-  return (arr||[]).filter(Boolean).join('\n')
+  return (arr || []).filter(Boolean).join('\n')
 }
 
 export function buildFilename(form) {
-  const clean = (s) => (s||'').replace(/[/\\?%*:|"<>\s]/g,'_').replace(/_+/g,'_')
-  return [clean(form.numero),clean(form.cliente_nome),clean(form.titulo),clean(form.referencia),'Rev'+clean(form.revisao)].filter(Boolean).join('_')
-}
-
-export function textoCarta(tipo) {
-  const t = (tipo||'').toLowerCase()
-  if (t.includes('montagem') && t.includes('fabricação'))
-    return 'Encaminhamos nossa proposta comercial para o fornecimento, fabricação, montagem e instalação conforme descrito no Item 1 desta proposta. As especificações técnicas apresentadas estão em plena conformidade com os documentos previamente encaminhados.'
-  if (t.includes('montagem') || t.includes('instalação'))
-    return 'Encaminhamos nossa proposta comercial para a montagem e instalação conforme descrito no Item 1 desta proposta. As especificações técnicas apresentadas estão em plena conformidade com os documentos previamente encaminhados.'
-  return 'Encaminhamos nossa proposta comercial para o fornecimento e fabricação conforme descrito no Item 1 desta proposta. As especificações técnicas apresentadas estão em plena conformidade com os documentos previamente encaminhados.'
+  const clean = (s) => (s || '').replace(/[/\\?%*:|"<>\s]/g, '_').replace(/_+/g, '_')
+  return [
+    clean(form.numero), clean(form.cliente_nome),
+    clean(form.titulo), clean(form.referencia),
+    'Rev' + clean(form.revisao)
+  ].filter(Boolean).join('_')
 }
 
 export function impostosToText(impostos) {
@@ -63,448 +55,326 @@ export function impostosToText(impostos) {
   return parts.join('\n')
 }
 
-// ─── PDF (HTML → print dialog) ───────────────────────────────────────────────
+export function textoCarta(tipo) {
+  const t = (tipo || '').toLowerCase()
+  if (t.includes('montagem') && t.includes('fabricação'))
+    return 'o fornecimento, fabricação, montagem e instalação'
+  if (t.includes('montagem') || t.includes('instalação'))
+    return 'a montagem e instalação'
+  return 'o fornecimento e fabricação'
+}
 
-function _htmlSecao(titulo, conteudo) {
-  if (!conteudo?.trim()) return ''
+// ─── constantes visuais ───────────────────────────────────────────────────────
+
+const LOGO_URL = 'https://carbat.com.br/wp-content/uploads/2024/06/Carbat-logo-sem-fundo--e1746032537163.png'
+const BLUE     = '#1565c0'
+
+// ─── helpers internos de HTML ─────────────────────────────────────────────────
+
+function _esc(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+}
+
+function _secao(num, titulo, conteudo) {
+  if (!conteudo || !conteudo.trim()) return ''
+  const linhas = _esc(conteudo).split('\n').map(l =>
+    `<p style="margin:2px 0 2px 5px;white-space:pre-wrap;color:#555;font-size:11px;">${l || '&nbsp;'}</p>`
+  ).join('')
   return `
-    <div style="margin-bottom:14px;page-break-inside:avoid">
-      <h3 style="color:#1565c0;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1.5px solid #e0e0e0;padding-bottom:5px;margin:0 0 7px">${titulo}</h3>
-      <p style="font-size:12px;line-height:1.65;margin:0;white-space:pre-line;color:#333">${conteudo}</p>
+    <div style="margin-bottom:18px;page-break-inside:avoid;">
+      <div style="background:#f7f9fc;border-left:4px solid ${BLUE};padding:6px 14px;margin:18px 0 8px 0;border-radius:0 4px 4px 0;">
+        <span style="font-size:11px;font-weight:bold;color:#333;text-transform:uppercase;">${num}. ${titulo}</span>
+      </div>
+      ${linhas}
     </div>`
 }
 
-function _htmlSecaoLista(titulo, conteudo) {
-  if (!conteudo?.trim()) return ''
-  const lis = conteudo.split('\n').map(l=>l.trim()).filter(Boolean)
-    .map(it=>`<li style="font-size:12px;line-height:1.7;color:#333;margin-bottom:3px">${it}</li>`).join('')
+function _miniHeader() {
   return `
-    <div style="margin-bottom:14px;page-break-inside:avoid">
-      <h3 style="color:#1565c0;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1.5px solid #e0e0e0;padding-bottom:5px;margin:0 0 7px">${titulo}</h3>
-      <ul style="margin:0;padding-left:18px;list-style-type:disc">${lis}</ul>
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;
+                border-bottom:1px solid #ccc;padding-bottom:12px;margin-bottom:20px;">
+      <img src="${LOGO_URL}" style="height:40px;width:auto;object-fit:contain;">
+      <div style="text-align:right;font-size:9px;color:#aaa;line-height:1.5;">
+        Documento Oficial<br>Carbat do Brasil
+      </div>
     </div>`
 }
 
-function _gerarHTMLProposta(form) {
-  const totalGeral = (form.itens||[]).reduce((s,it)=>s+(Number(it.qtd)||0)*(Number(it.valor)||0),0)
-  const pagamento  = form.pagamento==='OUTRO' ? form.pagamento_personalizado : form.pagamento
-  const impostos   = impostosToText(form.impostos)
+function _h1(texto) {
+  return `<h1 style="font-size:18px;color:${BLUE};text-align:right;text-transform:uppercase;
+                     border-bottom:2px solid ${BLUE};padding-bottom:8px;
+                     margin:30px 0 20px 0;font-weight:300;letter-spacing:2px;
+                     page-break-after:avoid;">${texto}</h1>`
+}
 
-  const itensRows = (form.itens||[]).map((it,i)=>`
-    <tr style="background:${i%2===0?'#fff':'#f9f9f9'}">
-      <td style="padding:7px 10px;border:1px solid #ddd;text-align:center;font-size:12px">${i+1}</td>
-      <td style="padding:7px 10px;border:1px solid #ddd;font-size:12px">${it.descricao||''}</td>
-      <td style="padding:7px 10px;border:1px solid #ddd;text-align:center;font-size:12px">${it.un||''}</td>
-      <td style="padding:7px 10px;border:1px solid #ddd;text-align:center;font-size:12px">${it.qtd||''}</td>
-      <td style="padding:7px 10px;border:1px solid #ddd;text-align:right;font-size:12px">${Number(it.valor||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
-      <td style="padding:7px 10px;border:1px solid #ddd;text-align:right;font-size:12px;font-weight:bold">${((Number(it.qtd)||0)*(Number(it.valor)||0)).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
-    </tr>`).join('')
+// ─── constrói as 3 páginas ────────────────────────────────────────────────────
 
-  const LOGO = `https://carbat.com.br/wp-content/uploads/2024/06/Carbat-logo-sem-fundo--e1746032537163.png`
+function _buildPages(form) {
+  const totalGeral = (form.itens || []).reduce(
+    (s, it) => s + (Number(it.qtd) || 0) * (Number(it.valor) || 0), 0
+  )
 
+  const pagamento = form.pagamento === 'OUTRO'
+    ? (form.pagamento_personalizado || '')
+    : (form.pagamento || '')
+
+  const pagamentoFinal = pagamento.toUpperCase().includes('PIX')
+    ? pagamento + '\n\nSegue Dados Bancários:\nCARBAT CARBONO ATIVADO DO BRASIL LTDA\nPIX CNPJ: 73.698.573/0002-95\nBANCO: 756 – SICOOB | AGÊNCIA: 4439 | C.C: 127686-7'
+    : pagamento
+
+  const impostos = impostosToText(form.impostos)
+
+  const itensRows = (form.itens || []).map((it, i) => {
+    const vUnit = Number(it.valor) || 0
+    const qtd   = Number(it.qtd)   || 0
+    const sub   = vUnit * qtd
+    const bg    = i % 2 === 1 ? 'background:#fcfcfc;' : ''
+    return `
+      <tr style="${bg}page-break-inside:avoid;">
+        <td style="text-align:center;border:1px solid #e0e0e0;padding:8px 6px;font-size:11px;">${i + 1}</td>
+        <td style="border:1px solid #e0e0e0;padding:8px 6px;font-size:11px;white-space:pre-wrap;">${_esc(it.descricao || '')}</td>
+        <td style="text-align:center;border:1px solid #e0e0e0;padding:8px 6px;font-size:11px;">${_esc(it.un || '')}</td>
+        <td style="text-align:center;border:1px solid #e0e0e0;padding:8px 6px;font-size:11px;">${it.qtd || ''}</td>
+        <td style="text-align:right;border:1px solid #e0e0e0;padding:8px 6px;font-size:11px;">${vUnit.toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+        <td style="text-align:right;border:1px solid #e0e0e0;padding:8px 6px;font-size:11px;font-weight:bold;">${sub.toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+      </tr>`
+  }).join('')
+
+  let cc = 2   // comercial (1 = tabela)
+  let ct = 1   // técnica
+
+  const docsArr    = form.documentos || []
+  const docsEnvio  = form.documentos_enviado_por
+    ? `\n\nEnviados por ${form.documentos_enviado_por}, no dia ${fmtDateDisplay(form.documentos_data)}.`
+    : ''
+  const docsTexto  = docsArr.filter(Boolean).join('\n') + docsEnvio
+
+  const escopoText     = arrToText([...(form.escopo      || []), ...(form.escopo_extra      || [])])
+  const foraEscopoText = arrToText([...(form.fora_escopo || []), ...(form.fora_escopo_extra  || [])])
+  const tratamentoText = arrToText([...(form.tratamento  || []), ...(form.tratamento_extra   || [])])
+  const databookText   = arrToText([...(form.databook    || []), ...(form.databook_extra     || [])])
+  const transporteText = (form.transporte_tipo || '') + (form.transporte_local ? '\nLocal: ' + form.transporte_local : '')
+
+  // ══ PÁG 1 – Carta ══════════════════════════════════════════════════════════
   const pag1 = `
-    <div style="page-break-after:always;font-family:Arial,sans-serif;padding:30px">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:12px;border-bottom:3px solid #1565c0;margin-bottom:24px">
-        <img src="${LOGO}" style="height:48px;object-fit:contain">
-        <div style="text-align:right;font-size:10px;color:#555;line-height:1.6">
-          BR-262, km 11,5, s/n – Três Lagoas/MS<br>(67) 3522-2400 | carbat@carbat.com.br
-        </div>
+    ${_miniHeader()}
+
+    <div style="background:#fcfcfc;border:1px solid #eee;border-left:4px solid #444;
+                padding:16px 18px;margin-bottom:22px;border-radius:4px;">
+      <p style="margin:5px 0;"><strong style="display:inline-block;width:140px;color:#000;">CONTRATANTE:</strong>${_esc(form.cliente_nome)}</p>
+      <p style="margin:5px 0;"><strong style="display:inline-block;width:140px;color:#000;">A/C:</strong>${_esc(form.contato)}</p>
+      <p style="margin:5px 0;"><strong style="display:inline-block;width:140px;color:#000;">REFERÊNCIA:</strong>${_esc(form.referencia)}</p>
+      <p style="margin:5px 0;"><strong style="display:inline-block;width:140px;color:#000;">DATA:</strong>${fmtDateDisplay(form.data_proposta)}</p>
+      <p style="margin:5px 0;"><strong style="display:inline-block;width:140px;color:#000;">Nº DA PROPOSTA:</strong>${_esc(form.numero)}&nbsp;&nbsp;<strong>REV:</strong>&nbsp;${_esc(form.revisao)}</p>
+    </div>
+
+    <div style="margin-top:24px;line-height:1.7;font-family:'Segoe UI',Arial,sans-serif;font-size:11px;color:#444;">
+      <p style="margin-bottom:10px;">Prezado Sr(a).,</p>
+      <p style="margin-bottom:10px;text-align:justify;">
+        Encaminhamos nossa proposta comercial para <strong>${textoCarta(form.tipo_fornecimento)}</strong>
+        conforme descrito no <strong>Item 1</strong> desta proposta. As especificações técnicas apresentadas
+        estão em plena conformidade com os documentos previamente encaminhados.
+      </p>
+      <p style="margin-bottom:10px;text-align:justify;">
+        A <strong>CARBAT</strong> reafirma seu compromisso em atender às expectativas de seus clientes,
+        assegurando a entrega de produtos e serviços com qualidade e dentro dos prazos estabelecidos.
+      </p>
+      <p style="margin-bottom:30px;text-align:justify;">
+        Agradecemos a oportunidade de participação e permanecemos à disposição para quaisquer
+        esclarecimentos adicionais que se façam necessários.
+      </p>
+      <p style="margin-bottom:4px;">Atenciosamente,</p>
+      <p><strong>CARBAT DO BRASIL</strong></p>
+    </div>
+
+    <div style="margin-top:60px;display:flex;justify-content:space-around;">
+      <div style="text-align:center;font-size:11px;line-height:1.6;flex:1;padding:0 20px;">
+        <strong>Eng.ª Camila Barcellos Gomes</strong><br>
+        <span style="color:#666;">camila@carbat.com.br<br>(71) 9 9367-4081</span>
       </div>
-      <table style="width:100%;border-collapse:collapse;margin-bottom:28px">
-        <tr><td style="font-size:12px;font-weight:bold;width:160px;padding:5px 0">CONTRATANTE:</td><td style="font-size:12px;padding:5px 0">${form.cliente_nome||''}</td></tr>
-        <tr><td style="font-size:12px;font-weight:bold;padding:5px 0">A/C:</td><td style="font-size:12px;padding:5px 0">${form.contato||''}</td></tr>
-        <tr><td style="font-size:12px;font-weight:bold;padding:5px 0">REFERÊNCIA:</td><td style="font-size:12px;padding:5px 0">${form.referencia||''}</td></tr>
-        <tr><td style="font-size:12px;font-weight:bold;padding:5px 0">DATA:</td><td style="font-size:12px;padding:5px 0">${fmtDateDisplay(form.data_proposta)}</td></tr>
-        <tr><td style="font-size:12px;font-weight:bold;padding:5px 0">Nº DA PROPOSTA:</td><td style="font-size:12px;padding:5px 0">${form.numero||''}</td></tr>
-      </table>
-      <p style="font-size:12px;line-height:1.7;margin-bottom:16px">Prezado Sr(a).,</p>
-      <p style="font-size:12px;line-height:1.7;margin-bottom:16px;text-align:justify">${textoCarta(form.tipo_fornecimento)}</p>
-      <p style="font-size:12px;line-height:1.7;margin-bottom:16px;text-align:justify">A CARBAT reafirma seu compromisso em atender às expectativas de seus clientes, assegurando a entrega de produtos e serviços com qualidade e dentro dos prazos estabelecidos.</p>
-      <p style="font-size:12px;line-height:1.7;margin-bottom:40px;text-align:justify">Agradecemos a oportunidade de participação e permanecemos à disposição para quaisquer esclarecimentos adicionais que se façam necessários.</p>
-      <p style="font-size:12px;margin-bottom:4px">Atenciosamente,</p>
-      <p style="font-size:12px;font-weight:bold;margin-bottom:60px">CARBAT DO BRASIL</p>
-      <div style="display:flex;gap:60px">
-        <div style="font-size:11px;line-height:1.7"><p style="margin:0;font-weight:bold">Eng.ª Camila Barcellos Gomes</p><p style="margin:0">camila@carbat.com.br</p><p style="margin:0">(71) 9 3387-4051</p></div>
-        <div style="font-size:11px;line-height:1.7"><p style="margin:0;font-weight:bold">Diretor Renato Gomes Filho</p><p style="margin:0">renato@carbat.com.br</p><p style="margin:0">(67) 9 9244-7793</p></div>
+      <div style="text-align:center;font-size:11px;line-height:1.6;flex:1;padding:0 20px;">
+        <strong>Diretor Renato Gomes Filho</strong><br>
+        <span style="color:#666;">renato@carbat.com.br<br>(67) 9 9244-7793</span>
       </div>
-      <div style="position:fixed;bottom:80px;right:40px;font-size:72px;font-weight:900;color:rgba(21,101,192,0.07);transform:rotate(-30deg);pointer-events:none">CARBAT</div>
     </div>`
 
+  // ══ PÁG 2 – Proposta Comercial ═════════════════════════════════════════════
   const pag2 = `
-    <div style="font-family:Arial,sans-serif;padding:30px">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;border-bottom:2px solid #1565c0;margin-bottom:20px">
-        <img src="${LOGO}" style="height:32px;object-fit:contain">
-        <span style="font-size:10px;color:#888">Proposta ${form.numero||''} — Rev. ${form.revisao||''} | ${fmtDateDisplay(form.data_proposta)}</span>
+    ${_miniHeader()}
+    ${_h1('Proposta Comercial')}
+
+    <div style="margin-bottom:18px;page-break-inside:avoid;">
+      <div style="background:#f7f9fc;border-left:4px solid ${BLUE};padding:6px 14px;margin:0 0 8px 0;border-radius:0 4px 4px 0;">
+        <span style="font-size:11px;font-weight:bold;color:#333;text-transform:uppercase;">1. ITENS DO ORÇAMENTO</span>
       </div>
-      <h2 style="color:#1565c0;font-size:12px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1.5px solid #e0e0e0;padding-bottom:6px;margin:0 0 10px">1. Itens do Orçamento</h2>
-      <table style="width:100%;border-collapse:collapse;margin-bottom:8px">
+      <table style="width:100%;border-collapse:collapse;">
         <thead>
-          <tr style="background:#1565c0;color:#fff">
-            <th style="padding:8px 10px;text-align:center;width:35px">#</th>
-            <th style="padding:8px 10px;text-align:left">Descrição de Fabricação</th>
-            <th style="padding:8px 10px;width:50px;text-align:center">Un.</th>
-            <th style="padding:8px 10px;width:60px;text-align:center">Qtd.</th>
-            <th style="padding:8px 10px;width:90px;text-align:right">Unit. R$</th>
-            <th style="padding:8px 10px;width:110px;text-align:right">Total R$</th>
+          <tr>
+            <th style="background:${BLUE};color:#fff;padding:8px 6px;border:1px solid ${BLUE};font-weight:normal;text-transform:uppercase;font-size:11px;text-align:center;width:38px;">Item</th>
+            <th style="background:${BLUE};color:#fff;padding:8px 6px;border:1px solid ${BLUE};font-weight:normal;text-transform:uppercase;font-size:11px;text-align:left;">Descrição</th>
+            <th style="background:${BLUE};color:#fff;padding:8px 6px;border:1px solid ${BLUE};font-weight:normal;text-transform:uppercase;font-size:11px;text-align:center;width:42px;">Un.</th>
+            <th style="background:${BLUE};color:#fff;padding:8px 6px;border:1px solid ${BLUE};font-weight:normal;text-transform:uppercase;font-size:11px;text-align:center;width:42px;">Qtd.</th>
+            <th style="background:${BLUE};color:#fff;padding:8px 6px;border:1px solid ${BLUE};font-weight:normal;text-transform:uppercase;font-size:11px;text-align:right;width:85px;">Unit. (R$)</th>
+            <th style="background:${BLUE};color:#fff;padding:8px 6px;border:1px solid ${BLUE};font-weight:normal;text-transform:uppercase;font-size:11px;text-align:right;width:95px;">Total (R$)</th>
           </tr>
         </thead>
         <tbody>${itensRows}</tbody>
+        <tfoot>
+          <tr>
+            <td colspan="5" style="text-align:right;border:1px solid #aaa;border-top:2px solid #aaa;padding:8px 6px;font-weight:bold;background:#f0f0f0;font-size:11px;">TOTAL DO PEDIDO</td>
+            <td style="text-align:right;border:1px solid #aaa;border-top:2px solid #aaa;padding:8px 6px;font-weight:bold;background:#f0f0f0;font-size:11px;">${totalGeral.toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+          </tr>
+        </tfoot>
       </table>
-      <div style="text-align:right;background:#e3f2fd;color:#0d47a1;padding:10px 14px;border-radius:5px;font-size:13px;font-weight:bold;margin-bottom:24px">
-        TOTAL GERAL: R$ ${totalGeral.toLocaleString('pt-BR',{minimumFractionDigits:2})}
+    </div>
+
+    ${_secao(cc++, 'OBSERVAÇÕES GERAIS',                    form.observacoes)}
+    ${_secao(cc++, 'REAJUSTE',                               form.reajuste)}
+    ${_secao(cc++, 'TRIBUTOS E ENCARGOS FISCAIS',            impostos)}
+    ${_secao(cc++, 'CONDIÇÕES DE PAGAMENTO',                 pagamentoFinal)}
+    ${_secao(cc++, 'VALIDADE DA PROPOSTA COMERCIAL',         form.validade_texto)}
+    ${_secao(cc++, 'PRAZO DE ENTREGA E CAPACIDADE PRODUTIVA',form.prazo_entrega)}
+    ${_secao(cc++, 'GARANTIA',                               form.garantia)}`
+
+  // ══ PÁG 3 – Proposta Técnica ════════════════════════════════════════════════
+  const pag3 = `
+    ${_miniHeader()}
+    ${_h1('Proposta Técnica')}
+
+    ${_secao(ct++, 'ESCOPO DE FORNECIMENTO',               escopoText)}
+    ${_secao(ct++, 'FORA DE ESCOPO / ESCOPO CONTRATANTE',  foraEscopoText)}
+    ${_secao(ct++, 'ENSAIOS NÃO DESTRUTIVOS (END)',         form.ensaios)}
+    ${_secao(ct++, 'TRATAMENTO ANTICORROSIVO',              tratamentoText)}
+    ${_secao(ct++, 'DATA BOOK TÉCNICO',                     databookText)}
+    ${_secao(ct++, 'CONDIÇÕES DE TRANSPORTE E LOGÍSTICA',   transporteText)}
+    ${_secao(ct++, 'DOCUMENTOS DE REFERÊNCIA RECEBIDOS',    docsTexto)}
+
+    <div style="margin-bottom:18px;page-break-inside:avoid;">
+      <div style="background:#f7f9fc;border-left:4px solid ${BLUE};padding:6px 14px;margin:18px 0 8px 0;border-radius:0 4px 4px 0;">
+        <span style="font-size:11px;font-weight:bold;color:#333;text-transform:uppercase;">${ct++}. INFORMAÇÕES DE CONTATO</span>
       </div>
-      ${form.observacoes ? _htmlSecao('Observações Gerais', form.observacoes) : ''}
-      ${_htmlSecao('Condições de Pagamento', pagamento)}
-      ${_htmlSecao('Validade da Proposta', form.validade_texto)}
-      ${_htmlSecao('Prazo de Entrega', form.prazo_entrega)}
-      ${_htmlSecao('Reajuste', form.reajuste)}
-      ${_htmlSecao('Tributos e Encargos Fiscais', impostos)}
-      ${_htmlSecao('Garantia', form.garantia)}
-      ${_htmlSecaoLista('Escopo de Fornecimento', arrToText([...(form.escopo||[]),...(form.escopo_extra||[])]))}
-      ${_htmlSecaoLista('Fora de Escopo / Escopo Contratante', arrToText([...(form.fora_escopo||[]),...(form.fora_escopo_extra||[])]))}
-      ${_htmlSecao('Ensaios Não Destrutivos', form.ensaios)}
-      ${_htmlSecaoLista('Tratamento Anticorrosivo', arrToText([...(form.tratamento||[]),...(form.tratamento_extra||[])]))}
-      ${_htmlSecaoLista('Data Book Técnico', arrToText([...(form.databook||[]),...(form.databook_extra||[])]))}
-      ${_htmlSecao('Condições de Transporte e Logística', (form.transporte_tipo||'')+(form.transporte_local?'\nLocal: '+form.transporte_local:''))}
-      ${_htmlSecaoLista('Documentos de Referência Recebidos',
-        arrToText(form.documentos||[])+(form.documentos_enviado_por?`\n\nEnviados por ${form.documentos_enviado_por}, no dia ${fmtDateDisplay(form.documentos_data)}.`:'')
-      )}
+      <div style="background:#fcfcfc;border:1px solid #eee;padding:14px 16px;font-size:11px;line-height:1.8;border-radius:4px;">
+        <strong style="color:${BLUE};">CARBAT CARBONO ATIVADO DO BRASIL LTDA</strong><br>
+        <strong>CNPJ:</strong> 73.698.573/0002-95<br>
+        <strong>Endereço:</strong> Rodovia BR 262, KM 11.5, S/N, Zona Rural, Três Lagoas/MS<br><br>
+        <strong style="color:${BLUE};">Contatos Comerciais:</strong><br>
+        • Eng.ª Camila Barcellos Gomes — camila@carbat.com.br — (71) 9 9367-4081<br>
+        • Diretor Renato Gomes Filho — renato@carbat.com.br — (67) 9 9244-7793
+      </div>
     </div>`
 
-  return pag1 + pag2
+  return { pag1, pag2, pag3 }
 }
+
+// ─── PDF ──────────────────────────────────────────────────────────────────────
 
 export function gerarPDF(form) {
   const nome = buildFilename(form)
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${nome}</title>
-    <style>@page{margin:15mm} body{margin:0;padding:0} @media print{.no-print{display:none}}</style>
-    </head><body>${_gerarHTMLProposta(form)}
-    <script>window.onload=()=>setTimeout(()=>window.print(),400)<\/script></body></html>`
+  const { pag1, pag2, pag3 } = _buildPages(form)
+
+  const PAGE_STYLE = `
+    font-family:'Segoe UI',Arial,sans-serif;font-size:11px;color:#444;
+    line-height:1.6;position:relative;`
+
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>${nome}</title>
+  <style>
+    @page { size: A4; margin: 15mm; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body {
+      font-family:'Segoe UI',Arial,sans-serif;
+      font-size:11px; line-height:1.6; color:#444;
+      background:#fff;
+      -webkit-print-color-adjust:exact;
+      print-color-adjust:exact;
+    }
+    @media screen {
+      body { background:#e0e0e0; padding:20px; }
+      .page {
+        width:210mm; min-height:257mm; background:#fff;
+        margin:0 auto 20px; padding:15mm;
+        box-shadow:0 4px 15px rgba(0,0,0,0.12);
+        page-break-after:always;
+      }
+    }
+    @media print {
+      .page { width:100%; padding:0; page-break-after:always; box-shadow:none; }
+      .page:last-child { page-break-after:avoid; }
+    }
+    .watermark {
+      position:fixed; top:50%; left:50%;
+      transform:translate(-50%,-50%) rotate(-45deg);
+      font-size:140px; font-weight:900;
+      color:rgba(0,0,0,0.03);
+      pointer-events:none; user-select:none;
+      white-space:nowrap; z-index:0;
+    }
+  </style>
+</head>
+<body>
+  <div class="watermark">CARBAT</div>
+  <div class="page" style="${PAGE_STYLE}">${pag1}</div>
+  <div class="page" style="${PAGE_STYLE}">${pag2}</div>
+  <div class="page" style="${PAGE_STYLE}">${pag3}</div>
+  <script>window.onload = () => setTimeout(() => window.print(), 500)<\/script>
+</body>
+</html>`
+
   const w = window.open('', '_blank')
   w.document.write(html)
   w.document.close()
 }
 
-// ─── DOCX ─────────────────────────────────────────────────────────────────────
+// ─── DOCX (HTML-Word) ─────────────────────────────────────────────────────────
 
-// Constantes de layout A4 (em DXA: 1 inch = 1440 DXA)
-const A4_W        = 11906  // ~21cm
-const A4_H        = 16838  // ~29.7cm
-const MARGIN      = 1134   // ~2cm
-const CONTENT_W   = A4_W - MARGIN * 2  // ~9638 DXA
+export function gerarDOCX(form) {
+  const nome = buildFilename(form)
+  const { pag1, pag2, pag3 } = _buildPages(form)
 
-const BLUE        = '1565C0'
-const LIGHT_BLUE  = 'E3F2FD'
-const BLUE_TEXT   = '0D47A1'
-const GRAY_LINE   = 'E0E0E0'
-const DARK        = '333333'
+  const doc = `<html xmlns:o="urn:schemas-microsoft-com:office:office"
+    xmlns:w="urn:schemas-microsoft-com:office:word"
+    xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="UTF-8">
+<title>${nome}</title>
+<!--[if gte mso 9]><xml>
+  <w:WordDocument>
+    <w:View>Print</w:View><w:Zoom>100</w:Zoom>
+    <w:DoNotOptimizeForBrowser/>
+  </w:WordDocument>
+  <o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings>
+</xml><![endif]-->
+<style>
+  @page Section1 {
+    size:21.0cm 29.7cm;
+    margin:1.5cm 1.5cm 1.5cm 1.5cm;
+    mso-header-margin:.5cm; mso-footer-margin:.5cm;
+  }
+  div.Section1 { page:Section1; }
+  body { font-family:Calibri,Arial,sans-serif; font-size:11pt; color:#444; line-height:1.5; }
+  p    { margin:4px 0; text-align:justify; }
+  table { border-collapse:collapse; width:100%; }
+  img  { display:inline-block; }
+</style>
+</head>
+<body><div class="Section1">
 
-// Bordas padrão de tabela
-const _border  = (color='CCCCCC') => ({ style: BorderStyle.SINGLE, size: 4, color })
-const _borders = (color='CCCCCC') => ({ top:_border(color), bottom:_border(color), left:_border(color), right:_border(color) })
-const _noBorder = () => ({ style: BorderStyle.NONE, size: 0, color: 'FFFFFF' })
-const _noBorders = () => ({ top:_noBorder(), bottom:_noBorder(), left:_noBorder(), right:_noBorder() })
+${pag1}
 
-// Parágrafo de texto simples
-function _p(text, opts={}) {
-  return new Paragraph({
-    spacing: { before: opts.spaceBefore||0, after: opts.spaceAfter||80 },
-    alignment: opts.align || AlignmentType.LEFT,
-    children: [new TextRun({
-      text: text||'',
-      font: 'Arial',
-      size: opts.size || 22,
-      bold: opts.bold || false,
-      color: opts.color || DARK,
-      italics: opts.italic || false,
-    })]
-  })
-}
+<p style="page-break-before:always;margin:0;font-size:1px;">&nbsp;</p>
+${pag2}
 
-// Linha separadora azul
-function _rule(color=BLUE) {
-  return new Paragraph({
-    spacing: { before: 0, after: 120 },
-    border: { bottom: { style: BorderStyle.SINGLE, size: 8, color, space: 2 } },
-    children: []
-  })
-}
+<p style="page-break-before:always;margin:0;font-size:1px;">&nbsp;</p>
+${pag3}
 
-// Título de seção (ex: "CONDIÇÕES DE PAGAMENTO")
-function _sectionTitle(text) {
-  return new Paragraph({
-    spacing: { before: 200, after: 60 },
-    border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: GRAY_LINE, space: 2 } },
-    children: [new TextRun({ text: text.toUpperCase(), font:'Arial', size:18, bold:true, color:BLUE })]
-  })
-}
+</div></body></html>`
 
-// Bloco de seção com título + texto (retorna array de Paragraph)
-function _secao(titulo, texto) {
-  if (!texto?.trim()) return []
-  const linhas = texto.split('\n').map(l => _p(l.trim(), { size:20, color:DARK }))
-  return [_sectionTitle(titulo), ...linhas]
-}
-
-// Bloco de seção com lista bullet
-function _secaoLista(titulo, texto) {
-  if (!texto?.trim()) return []
-  const itens = texto.split('\n').map(l=>l.trim()).filter(Boolean).map(l =>
-    new Paragraph({
-      numbering: { reference:'bullets', level:0 },
-      spacing: { before: 0, after: 40 },
-      children: [new TextRun({ text:l, font:'Arial', size:20, color:DARK })]
-    })
-  )
-  return [_sectionTitle(titulo), ...itens]
-}
-
-// Célula de tabela genérica
-function _cell(children, opts={}) {
-  return new TableCell({
-    width: { size: opts.width || 0, type: opts.widthType || WidthType.AUTO },
-    columnSpan: opts.colSpan,
-    rowSpan:    opts.rowSpan,
-    verticalAlign: opts.vAlign || VerticalAlign.CENTER,
-    shading: opts.fill ? { fill: opts.fill, type: ShadingType.CLEAR } : undefined,
-    borders: opts.borders || _borders(),
-    margins: { top:60, bottom:60, left:100, right:100 },
-    children: Array.isArray(children) ? children : [children],
-  })
-}
-
-// Célula de cabeçalho de tabela (fundo azul)
-function _headerCell(text, width) {
-  return _cell(
-    new Paragraph({ alignment:AlignmentType.CENTER, spacing:{before:0,after:0},
-      children:[new TextRun({text, font:'Arial', size:20, bold:true, color:'FFFFFF'})] }),
-    { width, widthType:WidthType.DXA, fill: BLUE, borders: _borders(BLUE) }
-  )
-}
-
-// ─── fetch logo como ArrayBuffer ─────────────────────────────────────────────
-async function _fetchLogo() {
-  try {
-    const res = await fetch('https://carbat.com.br/wp-content/uploads/2024/06/Carbat-logo-sem-fundo--e1746032537163.png')
-    if (!res.ok) return null
-    return await res.arrayBuffer()
-  } catch { return null }
-}
-
-// ─── Função principal ─────────────────────────────────────────────────────────
-export async function gerarDOCX(form) {
-  const logoBuffer = await _fetchLogo()
-  const totalGeral = (form.itens||[]).reduce((s,it)=>s+(Number(it.qtd)||0)*(Number(it.valor)||0),0)
-  const pagamento  = form.pagamento==='OUTRO' ? form.pagamento_personalizado : form.pagamento
-  const impostos   = impostosToText(form.impostos)
-
-  // Logo ImageRun (se conseguiu baixar)
-  const logoRun = logoBuffer
-    ? new ImageRun({ data: logoBuffer, transformation:{ width:150, height:40 }, type:'png' })
-    : new TextRun({ text:'CARBAT DO BRASIL', font:'Arial', size:28, bold:true, color:BLUE })
-
-  // ── Página 1: Carta ──────────────────────────────────────────────────────────
-
-  // Cabeçalho: logo + endereço lado a lado
-  const headerTable = new Table({
-    width: { size: CONTENT_W, type: WidthType.DXA },
-    columnWidths: [Math.round(CONTENT_W*0.5), Math.round(CONTENT_W*0.5)],
-    borders: { top:_noBorder(), bottom:{ style:BorderStyle.SINGLE, size:12, color:BLUE }, left:_noBorder(), right:_noBorder(), insideH:_noBorder(), insideV:_noBorder() },
-    rows: [new TableRow({ children: [
-      _cell(new Paragraph({ children:[logoRun] }), { width:Math.round(CONTENT_W*0.5), widthType:WidthType.DXA, borders:_noBorders() }),
-      _cell(new Paragraph({ alignment:AlignmentType.RIGHT, spacing:{before:0,after:0}, children:[
-        new TextRun({ text:'BR-262, km 11,5, s/n – Três Lagoas/MS', font:'Arial', size:18, color:'555555', break:0 }),
-        new TextRun({ text:'\n(67) 3522-2400 | carbat@carbat.com.br', font:'Arial', size:18, color:'555555', break:1 }),
-      ]}), { width:Math.round(CONTENT_W*0.5), widthType:WidthType.DXA, vAlign:VerticalAlign.BOTTOM, borders:_noBorders() }),
-    ]})]
-  })
-
-  // Tabela de dados da proposta
-  const dadosW1 = 2200, dadosW2 = CONTENT_W - dadosW1
-  const dadosRow = (label, value) => new TableRow({ children: [
-    _cell(new Paragraph({ children:[new TextRun({text:label, font:'Arial', size:20, bold:true, color:DARK})]}),
-      { width:dadosW1, widthType:WidthType.DXA, borders:_noBorders() }),
-    _cell(new Paragraph({ children:[new TextRun({text:value||'', font:'Arial', size:20, color:DARK})]}),
-      { width:dadosW2, widthType:WidthType.DXA, borders:_noBorders() }),
-  ]})
-
-  const dadosTable = new Table({
-    width: { size: CONTENT_W, type: WidthType.DXA },
-    columnWidths: [dadosW1, dadosW2],
-    borders: { top:_noBorder(), bottom:_noBorder(), left:_noBorder(), right:_noBorder(), insideH:_noBorder(), insideV:_noBorder() },
-    rows: [
-      dadosRow('CONTRATANTE:', form.cliente_nome),
-      dadosRow('A/C:', form.contato),
-      dadosRow('REFERÊNCIA:', form.referencia),
-      dadosRow('DATA:', fmtDateDisplay(form.data_proposta)),
-      dadosRow('Nº DA PROPOSTA:', form.numero),
-    ]
-  })
-
-  // Assinaturas
-  const assinW = Math.round(CONTENT_W / 2)
-  const assinTable = new Table({
-    width: { size: CONTENT_W, type: WidthType.DXA },
-    columnWidths: [assinW, assinW],
-    borders: { top:_noBorder(), bottom:_noBorder(), left:_noBorder(), right:_noBorder(), insideH:_noBorder(), insideV:_noBorder() },
-    rows: [new TableRow({ children: [
-      _cell([
-        new Paragraph({ children:[new TextRun({text:'Eng.ª Camila Barcellos Gomes', font:'Arial', size:20, bold:true, color:DARK})] }),
-        new Paragraph({ children:[new TextRun({text:'camila@carbat.com.br', font:'Arial', size:18, color:DARK})] }),
-        new Paragraph({ children:[new TextRun({text:'(71) 9 3387-4051', font:'Arial', size:18, color:DARK})] }),
-      ], { width:assinW, widthType:WidthType.DXA, borders:_noBorders(), vAlign:VerticalAlign.TOP }),
-      _cell([
-        new Paragraph({ children:[new TextRun({text:'Diretor Renato Gomes Filho', font:'Arial', size:20, bold:true, color:DARK})] }),
-        new Paragraph({ children:[new TextRun({text:'renato@carbat.com.br', font:'Arial', size:18, color:DARK})] }),
-        new Paragraph({ children:[new TextRun({text:'(67) 9 9244-7793', font:'Arial', size:18, color:DARK})] }),
-      ], { width:assinW, widthType:WidthType.DXA, borders:_noBorders(), vAlign:VerticalAlign.TOP }),
-    ]})]
-  })
-
-  const secao1Children = [
-    headerTable,
-    _p('', { spaceAfter:160 }),
-    dadosTable,
-    _p('', { spaceAfter:160 }),
-    _p('Prezado Sr(a).,', { size:22 }),
-    _p('', { spaceAfter:40 }),
-    _p(textoCarta(form.tipo_fornecimento), { size:22, align:AlignmentType.JUSTIFIED }),
-    _p('', { spaceAfter:40 }),
-    _p('A CARBAT reafirma seu compromisso em atender às expectativas de seus clientes, assegurando a entrega de produtos e serviços com qualidade e dentro dos prazos estabelecidos.', { size:22, align:AlignmentType.JUSTIFIED }),
-    _p('', { spaceAfter:40 }),
-    _p('Agradecemos a oportunidade de participação e permanecemos à disposição para quaisquer esclarecimentos adicionais que se façam necessários.', { size:22, align:AlignmentType.JUSTIFIED }),
-    _p('', { spaceAfter:240 }),
-    _p('Atenciosamente,', { size:22 }),
-    _p('CARBAT DO BRASIL', { size:22, bold:true }),
-    _p('', { spaceAfter:480 }),
-    assinTable,
-  ]
-
-  // ── Página 2: Conteúdo técnico ────────────────────────────────────────────────
-
-  // Mini header pag2
-  const miniHeaderTable = new Table({
-    width: { size: CONTENT_W, type: WidthType.DXA },
-    columnWidths: [Math.round(CONTENT_W*0.4), Math.round(CONTENT_W*0.6)],
-    borders: { top:_noBorder(), bottom:{ style:BorderStyle.SINGLE, size:8, color:BLUE }, left:_noBorder(), right:_noBorder(), insideH:_noBorder(), insideV:_noBorder() },
-    rows: [new TableRow({ children: [
-      _cell(new Paragraph({ children:[logoBuffer
-        ? new ImageRun({ data:logoBuffer, transformation:{width:120,height:32}, type:'png' })
-        : new TextRun({text:'CARBAT', font:'Arial', size:24, bold:true, color:BLUE})
-      ]}), { width:Math.round(CONTENT_W*0.4), widthType:WidthType.DXA, borders:_noBorders() }),
-      _cell(new Paragraph({ alignment:AlignmentType.RIGHT, spacing:{before:0,after:0}, children:[
-        new TextRun({ text:`Proposta ${form.numero||''} — Rev. ${form.revisao||''} | ${fmtDateDisplay(form.data_proposta)}`, font:'Arial', size:18, color:'888888' })
-      ]}), { width:Math.round(CONTENT_W*0.6), widthType:WidthType.DXA, vAlign:VerticalAlign.BOTTOM, borders:_noBorders() }),
-    ]})]
-  })
-
-  // Tabela de itens do orçamento
-  const colWidths = [400, CONTENT_W-400-500-600-900-1000, 500, 600, 900, 1000]
-  const itensRows = [
-    new TableRow({
-      tableHeader: true,
-      children: [
-        _headerCell('#',          colWidths[0]),
-        _headerCell('Descrição',  colWidths[1]),
-        _headerCell('Un.',        colWidths[2]),
-        _headerCell('Qtd.',       colWidths[3]),
-        _headerCell('Unit. R$',   colWidths[4]),
-        _headerCell('Total R$',   colWidths[5]),
-      ]
-    }),
-    ...(form.itens||[]).map((it,i) => {
-      const total = (Number(it.qtd)||0)*(Number(it.valor)||0)
-      const fill  = i%2===0 ? 'FFFFFF' : 'F9F9F9'
-      const mk = (text, align=AlignmentType.LEFT) =>
-        new Paragraph({ alignment:align, spacing:{before:0,after:0}, children:[new TextRun({text:String(text||''), font:'Arial', size:20, color:DARK})] })
-      return new TableRow({ children: [
-        _cell(mk(String(i+1), AlignmentType.CENTER), { width:colWidths[0], widthType:WidthType.DXA, fill }),
-        _cell(mk(it.descricao||''),                  { width:colWidths[1], widthType:WidthType.DXA, fill }),
-        _cell(mk(it.un||'', AlignmentType.CENTER),   { width:colWidths[2], widthType:WidthType.DXA, fill }),
-        _cell(mk(String(it.qtd||''), AlignmentType.CENTER), { width:colWidths[3], widthType:WidthType.DXA, fill }),
-        _cell(mk(Number(it.valor||0).toLocaleString('pt-BR',{minimumFractionDigits:2}), AlignmentType.RIGHT), { width:colWidths[4], widthType:WidthType.DXA, fill }),
-        _cell(new Paragraph({ alignment:AlignmentType.RIGHT, spacing:{before:0,after:0}, children:[
-          new TextRun({text:total.toLocaleString('pt-BR',{minimumFractionDigits:2}), font:'Arial', size:20, bold:true, color:DARK})
-        ]}), { width:colWidths[5], widthType:WidthType.DXA, fill }),
-      ]})
-    })
-  ]
-
-  const itensTable = new Table({
-    width: { size: CONTENT_W, type: WidthType.DXA },
-    columnWidths: colWidths,
-    rows: itensRows,
-  })
-
-  // Total geral
-  const totalRow = new Table({
-    width: { size: CONTENT_W, type: WidthType.DXA },
-    columnWidths: [CONTENT_W],
-    rows: [new TableRow({ children: [
-      _cell(new Paragraph({ alignment:AlignmentType.RIGHT, spacing:{before:0,after:0}, children:[
-        new TextRun({ text:`TOTAL GERAL: R$ ${totalGeral.toLocaleString('pt-BR',{minimumFractionDigits:2})}`, font:'Arial', size:24, bold:true, color:BLUE_TEXT })
-      ]}), { width:CONTENT_W, widthType:WidthType.DXA, fill:LIGHT_BLUE })
-    ]})]
-  })
-
-  const docsText = arrToText(form.documentos||'') +
-    (form.documentos_enviado_por ? `\n\nEnviados por ${form.documentos_enviado_por}, no dia ${fmtDateDisplay(form.documentos_data)}.` : '')
-
-  const secao2Children = [
-    miniHeaderTable,
-    _p('', { spaceAfter: 120 }),
-    _sectionTitle('1. Itens do Orçamento'),
-    _p('', { spaceAfter: 40 }),
-    itensTable,
-    _p('', { spaceAfter: 60 }),
-    totalRow,
-    ...(form.observacoes ? _secao('Observações Gerais', form.observacoes) : []),
-    ..._secao('Condições de Pagamento', pagamento),
-    ..._secao('Validade da Proposta', form.validade_texto),
-    ..._secao('Prazo de Entrega', form.prazo_entrega),
-    ..._secao('Reajuste', form.reajuste),
-    ..._secao('Tributos e Encargos Fiscais', impostos),
-    ..._secao('Garantia', form.garantia),
-    ..._secaoLista('Escopo de Fornecimento', arrToText([...(form.escopo||[]),...(form.escopo_extra||[])])),
-    ..._secaoLista('Fora de Escopo / Escopo Contratante', arrToText([...(form.fora_escopo||[]),...(form.fora_escopo_extra||[])])),
-    ..._secao('Ensaios Não Destrutivos', form.ensaios),
-    ..._secaoLista('Tratamento Anticorrosivo', arrToText([...(form.tratamento||[]),...(form.tratamento_extra||[])])),
-    ..._secaoLista('Data Book Técnico', arrToText([...(form.databook||[]),...(form.databook_extra||[])])),
-    ..._secao('Condições de Transporte e Logística', (form.transporte_tipo||'')+(form.transporte_local?'\nLocal: '+form.transporte_local:'')),
-    ..._secaoLista('Documentos de Referência Recebidos', docsText),
-  ]
-
-  // ── Montar documento ──────────────────────────────────────────────────────────
-  const doc = new Document({
-    numbering: {
-      config: [{
-        reference: 'bullets',
-        levels: [{ level:0, format:LevelFormat.BULLET, text:'•', alignment:AlignmentType.LEFT,
-          style: { paragraph: { indent:{ left:360, hanging:180 } } } }]
-      }]
-    },
-    sections: [
-      // Seção 1 – Carta (com quebra de página ao final)
-      {
-        properties: { page: { size:{ width:A4_W, height:A4_H }, margin:{ top:MARGIN, right:MARGIN, bottom:MARGIN, left:MARGIN } } },
-        children: [
-          ...secao1Children,
-          new Paragraph({ children: [new PageBreak()] }),
-        ]
-      },
-      // Seção 2 – Conteúdo técnico
-      {
-        properties: { page: { size:{ width:A4_W, height:A4_H }, margin:{ top:MARGIN, right:MARGIN, bottom:MARGIN, left:MARGIN } } },
-        children: secao2Children,
-      }
-    ]
-  })
-
-  const blob   = await Packer.toBlob(doc)
-  const url    = URL.createObjectURL(blob)
-  const a      = document.createElement('a')
-  a.href       = url
-  a.download   = buildFilename(form) + '.docx'
-  a.click()
+  const blob = new Blob(['\ufeff' + doc], { type:'application/msword;charset=utf-8' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href = url; a.download = nome + '.doc'; a.click()
   URL.revokeObjectURL(url)
 }

@@ -101,11 +101,18 @@ const PAGAMENTO_OPTS = [
   { value:'OUTRO',                                                label:'-- Adicionar outra forma --' },
 ]
 
+// Gera texto de reajuste com mês/ano atual
+function reajusteAtual() {
+  const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
+  const now = new Date()
+  return `Preço base: ${meses[now.getMonth()]}/${now.getFullYear()}. Os preços serão reajustados conforme a variação no Índice do Aço – INFOMET, toda vez que ultrapassar 10% de aumento.`
+}
+
 const EMPTY_FORM = {
   numero:'',revisao:'1.0',cliente_id:'',cliente_nome:'',contato:'',referencia:'',
   data_proposta:'',titulo:'',tipo_fornecimento:'fornecimento e fabricação',
-  status:'rascunho',valor_total:0,observacoes:'',
-  reajuste:'Preço base: Janeiro/2026. Os preços serão reajustados conforme a variação no Índice do Aço – INFOMET, toda vez que ultrapassar 10% de aumento.',
+  status:'rascunho',tipo_proposta:'comercial',valor_total:0,observacoes:'',
+  reajuste:reajusteAtual(),
   impostos:{icms:true,icms_val:'17',ipi:false,ipi_val:'',pis:true,pis_val:'0.65',cofins:true,cofins_val:'3.00',iss:false,iss_val:'',ncm:'73089010',cod_servico:''},
   pagamento:'30 DDL, após a emissão da Notas Fiscal.',pagamento_personalizado:'',
   validade_texto:'30 (Trinta) dias.',
@@ -309,6 +316,19 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
                 <select className={sel} value={form.status} onChange={e=>set('status',e.target.value)}>
                   {STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}
                 </select>
+              </Field>
+              <Field label="Tipo de Proposta" full>
+                <div className="flex gap-3">
+                  {[{v:'comercial',label:'📄 Proposta Comercial',desc:'Preços, condições e escopo comercial'},{v:'tecnica',label:'🔧 Proposta Técnica',desc:'Especificações e soluções técnicas'}].map(opt=>(
+                    <label key={opt.v} className={`flex-1 flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${form.tipo_proposta===opt.v?'border-blue-500 bg-blue-50':'border-slate-200 bg-white hover:border-slate-300'}`}>
+                      <input type="radio" className="mt-0.5 accent-blue-600" name="tipo_proposta" value={opt.v} checked={form.tipo_proposta===opt.v} onChange={()=>set('tipo_proposta',opt.v)}/>
+                      <div>
+                        <p className={`text-sm font-semibold ${form.tipo_proposta===opt.v?'text-blue-700':'text-slate-700'}`}>{opt.label}</p>
+                        <p className="text-xs text-slate-400 mt-0.5">{opt.desc}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
               </Field>
             </div>
             {(form.numero||form.cliente_nome||form.titulo)&&(
@@ -517,6 +537,14 @@ export default function PropostasPage() {
     await api.propostas.delete(id); load()
   }
 
+  // Atualiza só o status, sem gerar nova revisão
+  const updateStatus = async (proposta, novoStatus) => {
+    try {
+      await api.propostas.update(proposta.id, { ...proposta, status: novoStatus })
+      setPropostas(prev => prev.map(x => x.id === proposta.id ? { ...x, status: novoStatus } : x))
+    } catch(e) { alert(e.message) }
+  }
+
   const filtered = propostas.filter(p=>
     (p.titulo+p.cliente_nome+p.numero+p.status).toLowerCase().includes(search.toLowerCase())
   )
@@ -543,7 +571,7 @@ export default function PropostasPage() {
 
         {loading ? <Spinner/> : (
           <Table
-            headers={['Número / Rev.','Título','Cliente','Valor Total','Status','Data','']}
+            headers={['Número / Rev.','Tipo','Título','Cliente','Valor Total','Status','Data','']}
             empty={filtered.length===0?'Nenhuma proposta encontrada':''}
           >
             {filtered.map(p=>(
@@ -551,10 +579,37 @@ export default function PropostasPage() {
                 <td className="py-3 px-4 text-xs font-mono text-slate-600">
                   {p.numero||'—'}<span className="ml-1 text-slate-400">Rev.{p.revisao}</span>
                 </td>
+                <td className="py-3 px-4">
+                  <span className={`text-xs font-medium px-2 py-1 rounded-full ${p.tipo_proposta==='tecnica'?'bg-orange-100 text-orange-700':'bg-blue-100 text-blue-700'}`}>
+                    {p.tipo_proposta==='tecnica'?'Técnica':'Comercial'}
+                  </span>
+                </td>
                 <td className="py-3 px-4 font-medium text-slate-800 max-w-xs truncate">{p.titulo}</td>
                 <td className="py-3 px-4 text-slate-600 text-sm">{p.cliente_nome||'—'}</td>
                 <td className="py-3 px-4 text-sm font-semibold text-slate-700">{fmt(p.valor_total)}</td>
-                <td className="py-3 px-4"><Badge color={STATUS_COLOR[p.status]||'gray'}>{p.status}</Badge></td>
+                <td className="py-3 px-4">
+                  <select
+                    value={p.status}
+                    onChange={e => updateStatus(p, e.target.value)}
+                    style={{
+                      background:
+                        p.status==='aprovada'      ? '#dcfce7' :
+                        p.status==='enviada'       ? '#dbeafe' :
+                        p.status==='em_negociacao' ? '#fef9c3' :
+                        p.status==='perdida'       ? '#fee2e2' :
+                        p.status==='cancelada'     ? '#fee2e2' : '#f1f5f9',
+                      color:
+                        p.status==='aprovada'      ? '#15803d' :
+                        p.status==='enviada'       ? '#1d4ed8' :
+                        p.status==='em_negociacao' ? '#92400e' :
+                        p.status==='perdida'       ? '#b91c1c' :
+                        p.status==='cancelada'     ? '#b91c1c' : '#475569',
+                    }}
+                    className="text-xs font-semibold px-2 py-1 rounded-lg border-0 outline-none cursor-pointer transition-all"
+                  >
+                    {STATUS_OPTIONS.map(s => <option key={s} value={s} style={{background:'#fff',color:'#1e293b'}}>{s}</option>)}
+                  </select>
+                </td>
                 <td className="py-3 px-4 text-slate-600 text-xs">{fmtDateDisplay(p.data_proposta)}</td>
                 <td className="py-3 px-4">
                   <div className="flex gap-1 justify-end items-center">
