@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Plus, Pencil, Trash2, Search, X, ChevronDown, ChevronUp, FileText, FileDown } from 'lucide-react'
 import { api } from '../api/api'
 import { PageHeader, Card, Table, Spinner, Badge } from '../components/ui'
+import { gerarPDF, gerarDOCX, fmtDateDisplay, buildFilename } from '../utils/gerarProposta'
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 const STATUS_OPTIONS = ['rascunho', 'enviada', 'em_negociacao', 'aprovada', 'perdida', 'cancelada']
@@ -15,20 +16,15 @@ function parseDate(val) {
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(val)) { const [d,m,y]=val.split('/'); return `${y}-${m}-${d}` }
   return ''
 }
-function fmtDateDisplay(val) {
-  const d = parseDate(val); if (!d) return '—'
-  const [y,m,day] = d.split('-'); return `${day}/${m}/${y}`
-}
+
 function bumpRevisao(rev) {
   if (!rev) return '2.0'
   const n = parseFloat(rev)
   return isNaN(n) ? rev+'.1' : (Math.floor(n)+1)+'.0'
 }
-function buildFilename(form) {
-  const clean = (s) => (s||'').replace(/[/\\?%*:|"<>\s]/g,'_').replace(/_+/g,'_')
-  return [clean(form.numero),clean(form.cliente_nome),clean(form.titulo),clean(form.referencia),'Rev'+clean(form.revisao)].filter(Boolean).join('_')
-}
+
 function arrToText(arr) { return (arr||[]).filter(Boolean).join('\n') }
+
 function textToArr(text, knownOpts) {
   if (!text) return { selected:[], extra:[] }
   const lines = text.split('\n').map(l=>l.trim()).filter(Boolean)
@@ -36,6 +32,7 @@ function textToArr(text, knownOpts) {
   for (const line of lines) { if(knownOpts.includes(line)) selected.push(line); else extra.push(line) }
   return { selected, extra }
 }
+
 function parseImpostos(text) {
   const base = { icms:false,icms_val:'17',ipi:false,ipi_val:'',pis:false,pis_val:'0.65',cofins:false,cofins_val:'3.00',iss:false,iss_val:'',ncm:'73089010',cod_servico:'' }
   if (!text) return base
@@ -51,6 +48,7 @@ function parseImpostos(text) {
   }
   return base
 }
+
 function parseDocs(text) {
   if (!text) return { docs:[], enviado_por:'', data:'' }
   const parts = text.split('\n\nEnviados por ')
@@ -60,6 +58,7 @@ function parseDocs(text) {
     if (m) { enviado_por=m[1]; data=parseDate(m[2]) } }
   return { docs, enviado_por, data }
 }
+
 function parseTransporte(text) {
   if (!text) return { tipo:'CIF', local:'' }
   const lines = text.split('\n')
@@ -142,247 +141,6 @@ function buildForm(p) {
   }
 }
 
-// ─── texto da carta conforme tipo de fornecimento ─────────────────────────────
-function textoCarta(tipo) {
-  const t = (tipo||'').toLowerCase()
-  if (t.includes('montagem') && t.includes('fabricação'))
-    return 'Encaminhamos nossa proposta comercial para o fornecimento, fabricação, montagem e instalação conforme descrito no Item 1 desta proposta. As especificações técnicas apresentadas estão em plena conformidade com os documentos previamente encaminhados.'
-  if (t.includes('montagem') || t.includes('instalação'))
-    return 'Encaminhamos nossa proposta comercial para a montagem e instalação conforme descrito no Item 1 desta proposta. As especificações técnicas apresentadas estão em plena conformidade com os documentos previamente encaminhados.'
-  return 'Encaminhamos nossa proposta comercial para o fornecimento e fabricação conforme descrito no Item 1 desta proposta. As especificações técnicas apresentadas estão em plena conformidade com os documentos previamente encaminhados.'
-}
-
-// ─── PDF/DOC content generator ────────────────────────────────────────────────
-function gerarHTML(form) {
-  const totalGeral = (form.itens||[]).reduce((s,it)=>s+(Number(it.qtd)||0)*(Number(it.valor)||0),0)
-
-  const itensHTML = (form.itens||[]).map((it,i)=>`
-    <tr style="background:${i%2===0?'#fff':'#f9f9f9'}">
-      <td style="padding:7px 10px;border:1px solid #ddd;text-align:center;font-size:12px">${i+1}</td>
-      <td style="padding:7px 10px;border:1px solid #ddd;font-size:12px">${it.descricao||''}</td>
-      <td style="padding:7px 10px;border:1px solid #ddd;text-align:center;font-size:12px">${it.un||''}</td>
-      <td style="padding:7px 10px;border:1px solid #ddd;text-align:center;font-size:12px">${it.qtd||''}</td>
-      <td style="padding:7px 10px;border:1px solid #ddd;text-align:right;font-size:12px">${Number(it.valor||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
-      <td style="padding:7px 10px;border:1px solid #ddd;text-align:right;font-size:12px;font-weight:bold">${((Number(it.qtd)||0)*(Number(it.valor)||0)).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
-    </tr>`).join('')
-
-  const secao = (titulo, conteudo) => !conteudo?.trim() ? '' : `
-    <div style="margin-bottom:14px;page-break-inside:avoid">
-      <h3 style="color:#1565c0;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1.5px solid #e0e0e0;padding-bottom:5px;margin:0 0 7px">${titulo}</h3>
-      <p style="font-size:12px;line-height:1.65;margin:0;white-space:pre-line;color:#333">${conteudo}</p>
-    </div>`
-
-  // secao com itens em tópicos (bullet points)
-  const secaoLista = (titulo, conteudo) => {
-    if (!conteudo?.trim()) return ''
-    const itens = conteudo.split('\n').map(l=>l.trim()).filter(Boolean)
-    const lis = itens.map(it => `<li style="font-size:12px;line-height:1.7;color:#333;margin-bottom:3px">${it}</li>`).join('')
-    return `
-    <div style="margin-bottom:14px;page-break-inside:avoid">
-      <h3 style="color:#1565c0;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1.5px solid #e0e0e0;padding-bottom:5px;margin:0 0 7px">${titulo}</h3>
-      <ul style="margin:0;padding-left:18px;list-style-type:disc">${lis}</ul>
-    </div>`
-  }
-
-  const pagamento = form.pagamento==='OUTRO' ? form.pagamento_personalizado : form.pagamento
-  const impostosText = typeof form.impostos==='string' ? form.impostos
-    : (() => {
-        const imp=form.impostos||{}; const parts=[]
-        if(imp.icms)   parts.push(`• ICMS: ${imp.icms_val}%`)
-        if(imp.ipi)    parts.push(`• IPI: ${imp.ipi_val}%`)
-        if(imp.pis)    parts.push(`• PIS: ${imp.pis_val}% (Incluso)`)
-        if(imp.cofins) parts.push(`• COFINS: ${imp.cofins_val}% (Incluso)`)
-        if(imp.iss)    parts.push(`• ISS: ${imp.iss_val}`)
-        if(imp.ncm)    parts.push(`• NCM: ${imp.ncm}`)
-        if(imp.cod_servico) parts.push(`• Cód. Serviço: ${imp.cod_servico}`)
-        return parts.join('\n')
-      })()
-
-  // ── PÁGINA 1: Carta de apresentação ──────────────────────────────────────────
-  const pag1 = `
-    <div style="page-break-after:always;min-height:100vh;display:flex;flex-direction:column;font-family:Arial,sans-serif;padding:0">
-
-      <!-- cabeçalho com logo e endereço -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 30px 12px;border-bottom:3px solid #1565c0;margin-bottom:0">
-        <img src="https://carbat.com.br/wp-content/uploads/2024/06/Carbat-logo-sem-fundo--e1746032537163.png"
-          style="height:48px;object-fit:contain">
-        <div style="text-align:right;font-size:10px;color:#555;line-height:1.6">
-          BR-262, km 11,5, s/n – Três Lagoas/MS<br>
-          (67) 3522-2400 | carbat@carbat.com.br
-        </div>
-      </div>
-
-      <!-- dados da proposta -->
-      <div style="padding:30px 30px 0">
-        <table style="width:100%;border-collapse:collapse;margin-bottom:28px">
-          <tr><td style="font-size:12px;font-weight:bold;width:160px;padding:5px 0;color:#333">CONTRATANTE:</td>
-              <td style="font-size:12px;padding:5px 0;color:#333">${form.cliente_nome||''}</td></tr>
-          <tr><td style="font-size:12px;font-weight:bold;padding:5px 0;color:#333">A/C:</td>
-              <td style="font-size:12px;padding:5px 0;color:#333">${form.contato||''}</td></tr>
-          <tr><td style="font-size:12px;font-weight:bold;padding:5px 0;color:#333">REFERÊNCIA:</td>
-              <td style="font-size:12px;padding:5px 0;color:#333">${form.referencia||''}</td></tr>
-          <tr><td style="font-size:12px;font-weight:bold;padding:5px 0;color:#333">DATA:</td>
-              <td style="font-size:12px;padding:5px 0;color:#333">${fmtDateDisplay(form.data_proposta)}</td></tr>
-          <tr><td style="font-size:12px;font-weight:bold;padding:5px 0;color:#333">Nº DA PROPOSTA:</td>
-              <td style="font-size:12px;padding:5px 0;color:#333">${form.numero||''}</td></tr>
-        </table>
-
-        <!-- corpo da carta -->
-        <p style="font-size:12px;line-height:1.7;margin-bottom:16px;color:#333">Prezado Sr(a).,</p>
-        <p style="font-size:12px;line-height:1.7;margin-bottom:16px;color:#333;text-align:justify">
-          ${textoCarta(form.tipo_fornecimento)}
-        </p>
-        <p style="font-size:12px;line-height:1.7;margin-bottom:16px;color:#333;text-align:justify">
-          A CARBAT reafirma seu compromisso em atender às expectativas de seus clientes, assegurando a entrega de produtos e serviços com qualidade e dentro dos prazos estabelecidos.
-        </p>
-        <p style="font-size:12px;line-height:1.7;margin-bottom:40px;color:#333;text-align:justify">
-          Agradecemos a oportunidade de participação e permanecemos à disposição para quaisquer esclarecimentos adicionais que se façam necessários.
-        </p>
-
-        <p style="font-size:12px;margin-bottom:4px;color:#333">Atenciosamente,</p>
-        <p style="font-size:12px;font-weight:bold;margin-bottom:60px;color:#333">CARBAT DO BRASIL</p>
-
-        <!-- assinaturas -->
-        <div style="display:flex;gap:60px;margin-top:20px">
-          <div style="font-size:11px;color:#333;line-height:1.7">
-            <p style="margin:0;font-weight:bold">Eng.ª Camila Barcellos Gomes</p>
-            <p style="margin:0">camila@carbat.com.br</p>
-            <p style="margin:0">(71) 9 3387-4051</p>
-          </div>
-          <div style="font-size:11px;color:#333;line-height:1.7">
-            <p style="margin:0;font-weight:bold">Diretor Renato Gomes Filho</p>
-            <p style="margin:0">renato@carbat.com.br</p>
-            <p style="margin:0">(67) 9 9244-7793</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- marca d'água CARBAT -->
-      <div style="position:fixed;bottom:80px;right:40px;font-size:72px;font-weight:900;color:rgba(21,101,192,0.07);transform:rotate(-30deg);pointer-events:none;letter-spacing:-2px">
-        CARBAT
-      </div>
-    </div>`
-
-  // ── PÁGINAS SEGUINTES: Conteúdo técnico ───────────────────────────────────────
-  const pag2 = `
-    <div style="font-family:Arial,sans-serif;padding:30px;color:#333">
-
-      <!-- mini header em todas as páginas -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;border-bottom:2px solid #1565c0;margin-bottom:20px">
-        <img src="https://carbat.com.br/wp-content/uploads/2024/06/Carbat-logo-sem-fundo--e1746032537163.png" style="height:32px;object-fit:contain">
-        <span style="font-size:10px;color:#888">Proposta ${form.numero||''} — Rev. ${form.revisao||''} | ${fmtDateDisplay(form.data_proposta)}</span>
-      </div>
-
-      <!-- tabela de itens -->
-      <h2 style="color:#1565c0;font-size:12px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1.5px solid #e0e0e0;padding-bottom:6px;margin:0 0 10px">1. Itens do Orçamento</h2>
-      <table style="width:100%;border-collapse:collapse;margin-bottom:8px;font-size:12px">
-        <thead>
-          <tr style="background:#1565c0;color:#fff">
-            <th style="padding:8px 10px;text-align:center;width:35px">#</th>
-            <th style="padding:8px 10px;text-align:left">Descrição de Fabricação</th>
-            <th style="padding:8px 10px;width:50px">Un.</th>
-            <th style="padding:8px 10px;width:60px">Qtd.</th>
-            <th style="padding:8px 10px;width:90px;text-align:right">Unit. R$</th>
-            <th style="padding:8px 10px;width:110px;text-align:right">Total R$</th>
-          </tr>
-        </thead>
-        <tbody>${itensHTML}</tbody>
-      </table>
-      <div style="text-align:right;background:#e3f2fd;color:#0d47a1;padding:10px 14px;border-radius:5px;font-size:13px;font-weight:bold;margin-bottom:24px">
-        TOTAL GERAL: R$ ${totalGeral.toLocaleString('pt-BR',{minimumFractionDigits:2})}
-      </div>
-
-      ${form.observacoes?secao('Observações Gerais',form.observacoes):''}
-      ${secao('Condições de Pagamento', pagamento)}
-      ${secao('Validade da Proposta', form.validade_texto)}
-      ${secao('Prazo de Entrega', form.prazo_entrega)}
-      ${secao('Reajuste', form.reajuste)}
-      ${secao('Tributos e Encargos Fiscais', impostosText)}
-      ${secao('Garantia', form.garantia)}
-      ${secaoLista('Escopo de Fornecimento', arrToText([...(form.escopo||[]),...(form.escopo_extra||[])]))}
-      ${secaoLista('Fora de Escopo / Escopo Contratante', arrToText([...(form.fora_escopo||[]),...(form.fora_escopo_extra||[])]))}
-      ${secao('Ensaios Não Destrutivos', form.ensaios)}
-      ${secaoLista('Tratamento Anticorrosivo', arrToText([...(form.tratamento||[]),...(form.tratamento_extra||[])]))}
-      ${secaoLista('Data Book Técnico', arrToText([...(form.databook||[]),...(form.databook_extra||[])]))}
-      ${secao('Condições de Transporte e Logística', (form.transporte_tipo||'')+(form.transporte_local?'\nLocal: '+form.transporte_local:''))}
-      ${secaoLista('Documentos de Referência Recebidos',
-        arrToText(form.documentos||[])+(form.documentos_enviado_por?`\n\nEnviados por ${form.documentos_enviado_por}, no dia ${fmtDateDisplay(form.documentos_data)}.`:'')
-      )}
-    </div>`
-
-  return pag1 + pag2
-}
-
-function gerarPDF(form) {
-  const nome = buildFilename(form)
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${nome}</title>
-    <style>
-      @page { margin: 15mm 15mm 15mm 15mm; }
-      body { margin:0; padding:0; }
-      @media print { .no-print { display:none; } }
-    </style>
-    </head><body>
-    ${gerarHTML(form)}
-    <script>window.onload=()=>setTimeout(()=>window.print(),400)<\/script>
-    </body></html>`
-  const w = window.open('','_blank')
-  w.document.write(html); w.document.close()
-}
-
-function gerarDOC(form) {
-  const nome = buildFilename(form)
-  // Gera o HTML e força tamanho fixo nas imagens via substituição de string
-  let conteudo = gerarHTML(form)
-  // Adiciona width fixo em todas as tags <img>
-  conteudo = conteudo.replace(/<img([^>]*)>/gi, (m, attrs) => {
-    // Remove width/height existentes e injeta os corretos
-    const cleaned = attrs.replace(/width="[^"]*"/gi,'').replace(/height="[^"]*"/gi,'')
-      .replace(/style="([^"]*)"/gi, (sm, s) =>
-        `style="${s.replace(/width:[^;]*/gi,'').replace(/height:[^;]*/gi,'')};width:130px;height:auto"`)
-    // Se não tinha style, adiciona
-    if (!/style=/i.test(cleaned)) return `<img${cleaned} style="width:130px;height:auto">`
-    return `<img${cleaned}>`
-  })
-
-  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office"
-    xmlns:w="urn:schemas-microsoft-com:office:word"
-    xmlns="http://www.w3.org/TR/REC-html40">
-    <head>
-      <meta charset="UTF-8">
-      <title>${nome}</title>
-      <!--[if gte mso 9]><xml>
-        <w:WordDocument>
-          <w:View>Print</w:View>
-          <w:Zoom>100</w:Zoom>
-          <w:DoNotOptimizeForBrowser/>
-        </w:WordDocument>
-        <o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings>
-      </xml><![endif]-->
-      <style>
-        @page Section1 {
-          size: 21.0cm 29.7cm;
-          margin: 1.5cm 1.5cm 1.5cm 1.5cm;
-          mso-header-margin: 0.5cm;
-          mso-footer-margin: 0.5cm;
-        }
-        div.Section1 { page: Section1; }
-        body { font-family: Arial, sans-serif; font-size: 12px; color: #333; margin: 0; padding: 0; }
-        img { width: 130px !important; height: auto !important; max-width: 130px !important; display: block; }
-        table { border-collapse: collapse; width: 100%; }
-        td, th { font-size: 12px; }
-        p { margin: 0 0 8px 0; }
-      </style>
-    </head>
-    <body><div class="Section1">${conteudo}</div></body>
-    </html>`
-
-  const blob = new Blob(['\ufeff' + html], { type: 'application/msword;charset=utf-8' })
-  const url  = URL.createObjectURL(blob)
-  const a    = document.createElement('a')
-  a.href = url; a.download = nome + '.doc'; a.click()
-  URL.revokeObjectURL(url)
-}
-
 // ─── sub-components ───────────────────────────────────────────────────────────
 function Section({ title, children, defaultOpen=true }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -397,6 +155,7 @@ function Section({ title, children, defaultOpen=true }) {
     </div>
   )
 }
+
 function Field({ label, required, children, full }) {
   return (
     <div className={full?'col-span-2':''}>
@@ -407,6 +166,7 @@ function Field({ label, required, children, full }) {
     </div>
   )
 }
+
 const inp = "w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-50 focus:bg-white transition-colors"
 const sel = "w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 focus:bg-white"
 
@@ -436,9 +196,9 @@ function CheckGroup({ options, selected, onToggle, extras, onAddExtra, onRemoveE
   )
 }
 
-// ─── modal (sem botões de exportar) ──────────────────────────────────────────
+// ─── modal ────────────────────────────────────────────────────────────────────
 function PropostaModal({ modal, clientes, onClose, onSaved }) {
-  const [form, setForm]   = useState(modal.form)
+  const [form, setForm]     = useState(modal.form)
   const [saving, setSaving] = useState(false)
   const isEdit = modal.mode === 'edit'
 
@@ -722,7 +482,7 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
           </Section>
         </div>
 
-        {/* footer — somente salvar */}
+        {/* footer */}
         <div className="flex justify-end gap-3 p-5 border-t bg-slate-50 rounded-b-2xl sticky bottom-0">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100 transition-colors">Cancelar</button>
           <button type="button" onClick={save} disabled={saving}
@@ -798,22 +558,18 @@ export default function PropostasPage() {
                 <td className="py-3 px-4 text-slate-600 text-xs">{fmtDateDisplay(p.data_proposta)}</td>
                 <td className="py-3 px-4">
                   <div className="flex gap-1 justify-end items-center">
-                    {/* PDF */}
                     <button onClick={()=>gerarPDF(buildForm(p))}
                       className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 transition-colors" title="Gerar PDF">
                       <FileText size={14}/>
                     </button>
-                    {/* DOC */}
-                    <button onClick={()=>gerarDOC(buildForm(p))}
-                      className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-700 transition-colors" title="Gerar .DOC">
+                    <button onClick={()=>gerarDOCX(buildForm(p))}
+                      className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-700 transition-colors" title="Gerar .DOCX">
                       <FileDown size={14}/>
                     </button>
-                    {/* Editar */}
                     <button onClick={()=>openEdit(p)}
                       className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors" title="Editar">
                       <Pencil size={14}/>
                     </button>
-                    {/* Excluir */}
                     <button onClick={()=>del(p.id)}
                       className="p-1.5 rounded-lg hover:bg-red-50 text-red-400 transition-colors" title="Excluir">
                       <Trash2 size={14}/>
