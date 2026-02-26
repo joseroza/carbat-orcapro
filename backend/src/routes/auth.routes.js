@@ -1,7 +1,7 @@
 const router = require("express").Router();
 const db = require("../db");
 const jwt = require("jsonwebtoken");
-const { authMiddleware, adminMiddleware, JWT_SECRET } = require("../middleware/auth");
+const { authMiddleware, adminMiddleware, JWT_SECRET } = require("../middleware/auth.middleware");
 
 // ─── Login ────────────────────────────────────────────────────────────────────
 router.post("/login", async (req, res) => {

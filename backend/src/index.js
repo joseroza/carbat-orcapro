@@ -6,18 +6,18 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const { authMiddleware } = require("./middleware/auth");
+const { authMiddleware } = require('./middleware/auth.middleware');
 
-// ─── Rotas públicas (sem autenticação) ───────────────────────────────────────
-app.use("/api/auth", require("./routes/auth"));
+// ─── Rotas públicas ───────────────────────────────────────────────────────────
+app.use("/api/auth", require("./routes/auth.routes"));
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
-// ─── Rotas protegidas (exigem token JWT) ──────────────────────────────────────
+// ─── Rotas protegidas ─────────────────────────────────────────────────────────
 app.use("/api/clientes",  authMiddleware, require("./routes/clientes"));
 app.use("/api/propostas", authMiddleware, require("./routes/propostas"));
 app.use("/api/romaneios", authMiddleware, require("./routes/romaneios"));
 
-// ─── Frontend estático (produção) ────────────────────────────────────────────
+// ─── Frontend estático ────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, "../../frontend/dist")));
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "../../frontend/dist/index.html"));
