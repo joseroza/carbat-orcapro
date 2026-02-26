@@ -7,8 +7,8 @@ services:
     environment:
       DATABASE_URL: postgresql://neondb_owner:npg_RVvqfztkm0o8@ep-quiet-surf-ac5crtel-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
       PORT: 3001
-      ENCRYPTION_KEY: carbat-orcapro-chave-secreta-2024
-      JWT_SECRET: carbat_orcapro_secret_2024
+      ENCRYPTION_KEY: Rm2$Zx7#Qp9LvTk4hDsYcAfNeUgWjB5
+      JWT_SECRET: W3pQ8xK5mV1nLrTy6jHdCaEzSuBfGiOk
     ports:
       - "3001:3001"
 
