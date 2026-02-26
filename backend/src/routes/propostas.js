@@ -1,7 +1,7 @@
 const router = require("express").Router();
 const db = require("../db");
+const { encryptProposta, decryptProposta } = require("../middleware/crypto.middleware");
 
-// Retorna datas como string YYYY-MM-DD sem conversão de timezone
 function formatRow(row) {
   if (!row) return row;
   const dateFields = ["data_proposta", "data_validade", "documentos_data"];
@@ -14,7 +14,6 @@ function formatRow(row) {
   return result;
 }
 
-// Aceita data como string YYYY-MM-DD ou null
 function safeDate(val) {
   if (!val || val === "") return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
@@ -25,21 +24,20 @@ function safeDate(val) {
 router.get("/", async (req, res) => {
   try {
     const { rows } = await db.query("SELECT * FROM propostas ORDER BY created_date DESC");
-    res.json(rows.map(formatRow));
+    res.json(rows.map(r => decryptProposta(formatRow(r))));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.get("/:id", async (req, res) => {
   try {
     const { rows } = await db.query("SELECT * FROM propostas WHERE id=$1", [req.params.id]);
-    res.json(formatRow(rows[0]));
+    res.json(decryptProposta(formatRow(rows[0])));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post("/", async (req, res) => {
   try {
-    const f = req.body;
-    // condicoes_pagamento aceita tanto o campo novo quanto o legado
+    const f = encryptProposta(req.body);
     const pagamento = f.condicoes_pagamento || f.pagamento || null;
     const { rows } = await db.query(
       `INSERT INTO propostas (numero,revisao,cliente_id,cliente_nome,contato,referencia,titulo,
@@ -54,15 +52,15 @@ router.post("/", async (req, res) => {
        f.prazo_entrega, f.observacoes, f.reajuste, f.impostos, f.garantia,
        f.escopo, f.fora_escopo, f.ensaios, f.tratamento, f.databook,
        f.transporte, f.documentos, safeDate(f.documentos_data),
-       JSON.stringify(f.itens || [])]
+       JSON.stringify(req.body.itens || [])]
     );
-    res.json(formatRow(rows[0]));
+    res.json(decryptProposta(formatRow(rows[0])));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.put("/:id", async (req, res) => {
   try {
-    const f = req.body;
+    const f = encryptProposta(req.body);
     const pagamento = f.condicoes_pagamento || f.pagamento || null;
     const { rows } = await db.query(
       `UPDATE propostas SET numero=$1,revisao=$2,cliente_id=$3,cliente_nome=$4,contato=$5,
@@ -77,9 +75,9 @@ router.put("/:id", async (req, res) => {
        f.prazo_entrega, f.observacoes, f.reajuste, f.impostos, f.garantia,
        f.escopo, f.fora_escopo, f.ensaios, f.tratamento, f.databook,
        f.transporte, f.documentos, safeDate(f.documentos_data),
-       JSON.stringify(f.itens || []), req.params.id]
+       JSON.stringify(req.body.itens || []), req.params.id]
     );
-    res.json(formatRow(rows[0]));
+    res.json(decryptProposta(formatRow(rows[0])));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

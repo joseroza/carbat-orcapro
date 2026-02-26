@@ -1,27 +1,14 @@
 version: "3.9"
 
 services:
-  db:
-    image: postgres:16
-    restart: always
-    environment:
-      POSTGRES_USER: carbat
-      POSTGRES_PASSWORD: carbat123
-      POSTGRES_DB: orcapro
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
-    ports:
-      - "5432:5432"
-
   backend:
     build: ./backend
     restart: always
-    depends_on:
-      - db
     environment:
-      DATABASE_URL: postgres://carbat:carbat123@db:5432/orcapro
+      DATABASE_URL: postgresql://neondb_owner:npg_RVvqfztkm0o8@ep-quiet-surf-ac5crtel-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
       PORT: 3001
+      ENCRYPTION_KEY: carbat-orcapro-chave-secreta-2024
+      JWT_SECRET: carbat_orcapro_secret_2024
     ports:
       - "3001:3001"
 
@@ -32,6 +19,3 @@ services:
       - backend
     ports:
       - "3000:80"
-
-volumes:
-  pgdata:
