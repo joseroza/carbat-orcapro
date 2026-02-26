@@ -6,19 +6,19 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ─── Rotas da API ─────────────────────────────────────────────────────────────
-app.use("/api/clientes",  require("./routes/clientes"));
-app.use("/api/propostas", require("./routes/propostas"));
-app.use("/api/romaneios", require("./routes/romaneios"));
+const { authMiddleware } = require("./middleware/auth");
 
+// ─── Rotas públicas (sem autenticação) ───────────────────────────────────────
+app.use("/api/auth", require("./routes/auth"));
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
-// ─── Frontend estático (produção) ─────────────────────────────────────────────
-// Serve os arquivos gerados pelo "npm run build" dentro de frontend/dist
-app.use(express.static(path.join(__dirname, "../../frontend/dist")));
+// ─── Rotas protegidas (exigem token JWT) ──────────────────────────────────────
+app.use("/api/clientes",  authMiddleware, require("./routes/clientes"));
+app.use("/api/propostas", authMiddleware, require("./routes/propostas"));
+app.use("/api/romaneios", authMiddleware, require("./routes/romaneios"));
 
-// Qualquer rota que não seja /api/* retorna o index.html
-// Necessário para o React Router funcionar corretamente
+// ─── Frontend estático (produção) ────────────────────────────────────────────
+app.use(express.static(path.join(__dirname, "../../frontend/dist")));
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "../../frontend/dist/index.html"));
 });
