@@ -33,8 +33,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-blue-950 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
+  <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center p-4">      
+  <div className="w-full max-w-sm">
 
         {/* Logo / cabeçalho */}
         <div className="text-center mb-8">
@@ -43,7 +43,7 @@ export default function LoginPage() {
             alt="Carbat"
             className="h-12 object-contain mx-auto mb-4"
           />
-          <h1 className="text-2xl font-bold text-white">OrcaPro</h1>
+          <h1 className="text-slate-400 text-sm mt-1">OrcaPro</h1>
           <p className="text-slate-400 text-sm mt-1">Faça login para continuar</p>
         </div>
 
