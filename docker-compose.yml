@@ -1,13 +1,14 @@
-version: "3.9"
-
 services:
   backend:
     build: ./backend
     restart: always
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     environment:
-      DATABASE_URL: postgresql://postgres:Hitman47@db.iqiyrktozcsoowhfrlop.supabase.co:5432/postgres
+      DATABASE_URL: postgresql://postgres.jryeofiyruzeooqratst:carbat@2427@aws-0-us-west-2.pooler.supabase.com:5432/postgres
       PORT: 3001
-      ENCRYPTION_KEY: Rm2$Zx7#Qp9LvTk4hDsYcAfNeUgWjB5
+      ENCRYPTION_KEY: 'Rm2$$Zx7#Qp9LvTk4hDsYcAfNeUgWjB5'
       JWT_SECRET: W3pQ8xK5mV1nLrTy6jHdCaEzSuBfGiOk
     ports:
       - "3001:3001"

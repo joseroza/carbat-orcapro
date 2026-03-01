@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Plus, Pencil, Trash2, Search, X, ChevronDown, ChevronUp, FileText, FileDown, AlertTriangle } from 'lucide-react'
+import { Plus, Pencil, Trash2, Search, X, ChevronDown, ChevronUp, FileText, FileDown, AlertTriangle, Filter } from 'lucide-react'
 import { api } from '../api/api'
 import { PageHeader, Card, Table, Spinner, Badge } from '../components/ui'
 import { gerarPDF, gerarDOCX, fmtDateDisplay, buildFilename } from '../utils/gerarProposta'
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
 const STATUS_OPTIONS = ['rascunho', 'enviada', 'em_negociacao', 'aprovada', 'perdida', 'cancelada']
 const STATUS_COLOR   = { rascunho: 'gray', enviada: 'blue', em_negociacao: 'yellow', aprovada: 'green', perdida: 'red', cancelada: 'red' }
 const fmt = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -16,15 +15,12 @@ function parseDate(val) {
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(val)) { const [d,m,y]=val.split('/'); return `${y}-${m}-${d}` }
   return ''
 }
-
 function bumpRevisao(rev) {
   if (!rev) return '2.0'
   const n = parseFloat(rev)
   return isNaN(n) ? rev+'.1' : (Math.floor(n)+1)+'.0'
 }
-
 function arrToText(arr) { return (arr||[]).filter(Boolean).join('\n') }
-
 function textToArr(text, knownOpts) {
   if (!text) return { selected:[], extra:[] }
   const lines = text.split('\n').map(l=>l.trim()).filter(Boolean)
@@ -32,7 +28,6 @@ function textToArr(text, knownOpts) {
   for (const line of lines) { if(knownOpts.includes(line)) selected.push(line); else extra.push(line) }
   return { selected, extra }
 }
-
 function parseImpostos(text) {
   const base = { icms:false,icms_val:'17',ipi:false,ipi_val:'',pis:false,pis_val:'0.65',cofins:false,cofins_val:'3.00',iss:false,iss_val:'',ncm:'73089010',cod_servico:'' }
   if (!text) return base
@@ -48,7 +43,6 @@ function parseImpostos(text) {
   }
   return base
 }
-
 function parseDocs(text) {
   if (!text) return { docs:[], enviado_por:'', data:'' }
   const parts = text.split('\n\nEnviados por ')
@@ -58,14 +52,12 @@ function parseDocs(text) {
     if (m) { enviado_por=m[1]; data=parseDate(m[2]) } }
   return { docs, enviado_por, data }
 }
-
 function parseTransporte(text) {
   if (!text) return { tipo:'CIF', local:'' }
   const lines = text.split('\n')
   return { tipo:lines[0]?.trim()||'CIF', local:lines[1]?.replace('Local: ','').trim()||'' }
 }
 
-// ─── static data ──────────────────────────────────────────────────────────────
 const ESCOPO_OPTS = [
   'Mão de obra especializada;',
   'Mão de obra especializada, contratada pela RGF Montagens Industriais Ltda (CNPJ 49.551.973/0001-08);',
@@ -115,7 +107,7 @@ const EMPTY_FORM = {
   impostos:{icms:true,icms_val:'17',ipi:false,ipi_val:'',pis:true,pis_val:'0.65',cofins:true,cofins_val:'3.00',iss:false,iss_val:'',ncm:'73089010',cod_servico:''},
   pagamento:'30 DDL, após a emissão da Notas Fiscal.',pagamento_personalizado:'',
   validade_texto:'30 (Trinta) dias.',
-  prazo_entrega:'Em até 20 dias úteis após recebimento do pedido oficial.',
+  prazo_entrega:'Em até 20 dias úteis após recebimento do pedido de compra.',
   garantia:'Garantia Mecânica: A CARBAT garante a CONTRATANTE que irá corrigir, substituir qualquer material com defeito ou que apresente não conformidade, bem como será responsável por defeitos latentes ou ocultos por um período de 12 (doze) meses a contar da data de emissão da NF-e;\nNão nos responsabilizamos por mau uso das peças.',
   escopo:[],escopo_extra:[],fora_escopo:[],fora_escopo_extra:[],
   ensaios:'Não se aplica (teste hidrostático, teste de corrente parasita, ultrassom e LP).',
@@ -147,7 +139,20 @@ function buildForm(p) {
   }
 }
 
-// ─── sub-components ───────────────────────────────────────────────────────────
+function gerarProximoNumero(propostas) {
+  const BASE = 260000
+  if (!propostas || propostas.length === 0) return String(BASE + 1)
+  let maxSeq = 0
+  for (const p of propostas) {
+    const num = parseInt((p.numero || '').replace(/\D/g, ''), 10)
+    if (!isNaN(num) && num > BASE) {
+      const seq = num - BASE
+      if (seq > maxSeq) maxSeq = seq
+    }
+  }
+  return String(BASE + maxSeq + 1)
+}
+
 function Section({ title, children, defaultOpen=true }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
@@ -161,7 +166,6 @@ function Section({ title, children, defaultOpen=true }) {
     </div>
   )
 }
-
 function Field({ label, required, children, full }) {
   return (
     <div className={full?'col-span-2':''}>
@@ -172,7 +176,6 @@ function Field({ label, required, children, full }) {
     </div>
   )
 }
-
 const inp = "w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-50 focus:bg-white transition-colors"
 const sel = "w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 focus:bg-white"
 
@@ -181,66 +184,47 @@ function CheckGroup({ options, selected, onToggle, extras, onAddExtra, onRemoveE
     <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-1">
       {options.map((opt,i)=>(
         <label key={i} className="flex items-start gap-2 text-sm cursor-pointer hover:bg-white rounded px-2 py-1.5 transition-colors">
-          <input type="checkbox" className="mt-0.5 accent-blue-600"
-            checked={selected.includes(opt)} onChange={()=>onToggle(opt)} />
+          <input type="checkbox" className="mt-0.5 accent-blue-600" checked={selected.includes(opt)} onChange={()=>onToggle(opt)} />
           <span className="text-slate-700">{opt}</span>
         </label>
       ))}
       {extras.map((val,i)=>(
         <div key={i} className="flex gap-2 items-center mt-1">
-          <input className={inp} value={val} placeholder="Digite um item adicional..."
-            onChange={e=>onChangeExtra(i,e.target.value)} />
-          <button type="button" onClick={()=>onRemoveExtra(i)}
-            className="text-red-500 hover:text-red-700 p-1 flex-shrink-0"><X size={14}/></button>
+          <input className={inp} value={val} placeholder="Digite um item adicional..." onChange={e=>onChangeExtra(i,e.target.value)} />
+          <button type="button" onClick={()=>onRemoveExtra(i)} className="text-red-500 hover:text-red-700 p-1 flex-shrink-0"><X size={14}/></button>
         </div>
       ))}
-      <button type="button" onClick={onAddExtra}
-        className="mt-2 text-xs bg-slate-500 text-white px-3 py-1.5 rounded hover:bg-slate-600 w-fit">
-        + Adicionar Item
-      </button>
+      <button type="button" onClick={onAddExtra} className="mt-2 text-xs bg-slate-500 text-white px-3 py-1.5 rounded hover:bg-slate-600 w-fit">+ Adicionar Item</button>
     </div>
   )
 }
 
-// ─── modal ────────────────────────────────────────────────────────────────────
 function PropostaModal({ modal, clientes, onClose, onSaved }) {
   const [form, setForm]     = useState(modal.form)
   const [saving, setSaving] = useState(false)
   const isEdit = modal.mode === 'edit'
-
-  // Apenas clientes aprovados podem ser selecionados
-  const clientesAprovados = clientes.filter(c => c.aprovado === true)
-
-  // Se editando, verifica se o cliente atual ainda está aprovado
-  const clienteAtualReprovado = isEdit
-    && form.cliente_nome
-    && clientes.some(c => c.razao_social === form.cliente_nome && c.aprovado === false)
-
+  const clientesDisponiveis = clientes.filter(c => c.aprovado === true || c.aprovado === false)
   const set    = (k,v) => setForm(f=>({...f,[k]:v}))
   const setImp = (k,v) => setForm(f=>({...f,impostos:{...f.impostos,[k]:v}}))
   const toggleCheck = (field,val) => setForm(f=>({...f,[field]:f[field].includes(val)?f[field].filter(x=>x!==val):[...f[field],val]}))
   const addExtra    = (field) => setForm(f=>({...f,[field]:[...f[field],'']}))
   const removeExtra = (field,i) => setForm(f=>({...f,[field]:f[field].filter((_,idx)=>idx!==i)}))
   const changeExtra = (field,i,v) => setForm(f=>({...f,[field]:f[field].map((x,idx)=>idx===i?v:x)}))
-
   const addItem    = () => setForm(f=>({...f,itens:[...f.itens,{descricao:'',un:'Kg',qtd:1,valor:0}]}))
   const removeItem = (i) => setForm(f=>{const itens=f.itens.filter((_,idx)=>idx!==i);return{...f,itens,valor_total:itens.reduce((s,it)=>s+(Number(it.qtd)||0)*(Number(it.valor)||0),0)}})
   const setItem    = (i,k,v) => setForm(f=>{const itens=f.itens.map((it,idx)=>idx!==i?it:{...it,[k]:v});return{...f,itens,valor_total:itens.reduce((s,it)=>s+(Number(it.qtd)||0)*(Number(it.valor)||0),0)}})
   const addDoc     = () => setForm(f=>({...f,documentos:[...f.documentos,'']}))
   const removeDoc  = (i) => setForm(f=>({...f,documentos:f.documentos.filter((_,idx)=>idx!==i)}))
   const setDoc     = (i,v) => setForm(f=>({...f,documentos:f.documentos.map((x,idx)=>idx===i?v:x)}))
-
-  // Seleciona cliente pelo id, preenchendo nome automaticamente
-  const handleClienteChange = (id) => {
-    const cliente = clientesAprovados.find(c => c.id === id)
-    setForm(f => ({
-      ...f,
-      cliente_id: id,
-      cliente_nome: cliente ? cliente.razao_social : '',
-      contato: cliente?.contato_principal || f.contato,
-    }))
+  const handleClienteChange = (digitado) => {
+    const cliente = clientesDisponiveis.find(c => c.razao_social === digitado)
+    if (cliente) {
+      const reprovado = cliente.aprovado === false
+      setForm(f => ({ ...f, cliente_id: cliente.id, cliente_nome: cliente.razao_social, contato: cliente.contato_principal || f.contato, pagamento: reprovado ? 'PIX' : f.pagamento }))
+    } else {
+      setForm(f => ({ ...f, cliente_nome: digitado, cliente_id: '' }))
+    }
   }
-
   function serializeImpostos(imp) {
     const parts=[]
     if(imp.icms)   parts.push(`• ICMS: ${imp.icms_val}%`)
@@ -252,23 +236,8 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
     if(imp.cod_servico) parts.push(`• Cód. Serviço: ${imp.cod_servico}`)
     return parts.join('\n')
   }
-
   const save = async () => {
     if (!form.titulo.trim()) return alert('Título é obrigatório')
-
-    // Bloqueia salvamento se cliente estiver reprovado
-    if (clienteAtualReprovado) {
-      return alert('Não é possível salvar uma proposta para um cliente reprovado. Altere o cliente antes de continuar.')
-    }
-
-    // Valida que o cliente selecionado é aprovado
-    if (form.cliente_nome) {
-      const clienteEncontrado = clientes.find(c => c.razao_social === form.cliente_nome)
-      if (clienteEncontrado && clienteEncontrado.aprovado !== true) {
-        return alert('Selecione um cliente aprovado para criar a proposta.')
-      }
-    }
-
     setSaving(true)
     try {
       const revisao = isEdit ? bumpRevisao(form.revisao) : form.revisao
@@ -290,16 +259,12 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
     } catch(e) { alert(e.message) }
     finally { setSaving(false) }
   }
-
   const totalGeral = form.itens.reduce((s,it)=>s+(Number(it.qtd)||0)*(Number(it.valor)||0),0)
   const nextRev    = isEdit ? bumpRevisao(form.revisao) : form.revisao
   const filename   = buildFilename(form)
-
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl my-4">
-
-        {/* header */}
         <div className="flex items-center justify-between p-5 border-b bg-white rounded-t-2xl sticky top-0 z-10 shadow-sm">
           <div className="flex items-center gap-3">
             <img src="https://carbat.com.br/wp-content/uploads/2024/06/Carbat-logo-sem-fundo--e1746032537163.png" alt="Carbat" className="h-8 object-contain"/>
@@ -310,47 +275,21 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"><X size={20}/></button>
         </div>
-
-        {/* Aviso de cliente reprovado (modo edição) */}
-        {clienteAtualReprovado && (
-          <div className="mx-5 mt-4 flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
-            <AlertTriangle size={18} className="text-red-500 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-semibold text-red-700">Cliente reprovado</p>
-              <p className="text-xs text-red-600 mt-0.5">
-                O cliente <strong>{form.cliente_nome}</strong> foi reprovado após a criação desta proposta.
-                Para salvar alterações, selecione um cliente aprovado.
-              </p>
-            </div>
-          </div>
-        )}
-
         <div className="p-5">
-          {/* Cabeçalho */}
           <Section title="Cabeçalho da Proposta">
             <div className="grid grid-cols-2 gap-4">
-
-              {/* ── Campo Contratante: apenas clientes aprovados ── */}
               <Field label="Contratante">
-                {clientesAprovados.length === 0 ? (
-                  <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                    <AlertTriangle size={14} className="text-amber-500 flex-shrink-0" />
-                    <span className="text-xs text-amber-700">Nenhum cliente aprovado cadastrado. Aprove um cliente primeiro.</span>
+                <input list="lista-clientes" className={inp} value={form.cliente_nome || ''} onChange={e => handleClienteChange(e.target.value)} placeholder="Digite ou selecione um cliente..."/>
+                <datalist id="lista-clientes">
+                  {clientesDisponiveis.map(c => (<option key={c.id} value={c.razao_social}>{c.aprovado === false ? '⚠ Reprovado' : c.nome_fantasia || ''}</option>))}
+                </datalist>
+                {clientes.some(c => c.razao_social === form.cliente_nome && c.aprovado === false) && (
+                  <div className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+                    <AlertTriangle size={12} className="flex-shrink-0"/>
+                    Cliente reprovado — pagamento alterado para PIX automaticamente.
                   </div>
-                ) : (
-                  <select
-                    className={sel}
-                    value={form.cliente_id || ''}
-                    onChange={e => handleClienteChange(e.target.value)}
-                  >
-                    <option value="">Selecione um cliente aprovado...</option>
-                    {clientesAprovados.map(c => (
-                      <option key={c.id} value={c.id}>{c.razao_social}{c.nome_fantasia ? ` — ${c.nome_fantasia}` : ''}</option>
-                    ))}
-                  </select>
                 )}
               </Field>
-
               <Field label="A/C (Contato)">
                 <input className={inp} value={form.contato} onChange={e=>set('contato',e.target.value)} placeholder="Nome do responsável"/>
               </Field>
@@ -361,7 +300,10 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
                 <input type="date" className={inp} value={form.data_proposta} onChange={e=>set('data_proposta',e.target.value)}/>
               </Field>
               <Field label="Nº da Proposta">
-                <input className={inp} value={form.numero} onChange={e=>set('numero',e.target.value)} placeholder="260000"/>
+                <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden bg-slate-100">
+                  <span className="px-3 py-2 text-sm font-mono font-bold text-slate-700 flex-1">{form.numero || '—'}</span>
+                  <span className="px-3 py-2 text-xs text-slate-400 bg-slate-100 border-l border-slate-200 select-none">automático</span>
+                </div>
               </Field>
               <Field label="Revisão atual">
                 <input className={`${inp} bg-slate-100 text-slate-500`} value={form.revisao} readOnly title="Incrementada automaticamente ao salvar"/>
@@ -381,7 +323,6 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
                   {STATUS_OPTIONS.map(s=><option key={s} value={s}>{s}</option>)}
                 </select>
               </Field>
-
             </div>
             {(form.numero||form.cliente_nome||form.titulo)&&(
               <div className="mt-4 bg-slate-800 rounded-lg px-4 py-3">
@@ -390,8 +331,6 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
               </div>
             )}
           </Section>
-
-          {/* Itens */}
           <Section title="1. Itens do Orçamento">
             <div className="overflow-x-auto rounded-lg border border-slate-200">
               <table className="w-full text-sm">
@@ -407,23 +346,16 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {form.itens.length===0&&(
-                    <tr><td colSpan={7} className="py-8 text-center text-slate-400 text-sm italic">Clique em "+ Adicionar Novo Item" para começar</td></tr>
-                  )}
+                  {form.itens.length===0&&(<tr><td colSpan={7} className="py-8 text-center text-slate-400 text-sm italic">Clique em "+ Adicionar Novo Item" para começar</td></tr>)}
                   {form.itens.map((it,i)=>(
                     <tr key={i} className={`border-t border-slate-100 ${i%2===0?'bg-white':'bg-slate-50'}`}>
                       <td className="px-3 py-2 text-center text-slate-400 text-xs">{i+1}</td>
-                      <td className="px-2 py-1">
-                        <textarea className="w-full text-sm resize-none border-0 outline-none bg-transparent min-h-[36px] p-1"
-                          rows={1} value={it.descricao} placeholder="Descrição do item" onChange={e=>setItem(i,'descricao',e.target.value)}/>
-                      </td>
+                      <td className="px-2 py-1"><textarea className="w-full text-sm resize-none border-0 outline-none bg-transparent min-h-[36px] p-1" rows={1} value={it.descricao} placeholder="Descrição do item" onChange={e=>setItem(i,'descricao',e.target.value)}/></td>
                       <td className="px-2 py-1"><input className="w-full text-sm border-0 outline-none bg-transparent text-center" value={it.un} onChange={e=>setItem(i,'un',e.target.value)}/></td>
                       <td className="px-2 py-1"><input type="number" className="w-full text-sm border-0 outline-none bg-transparent text-center" value={it.qtd} min={1} onChange={e=>setItem(i,'qtd',e.target.value)}/></td>
                       <td className="px-2 py-1"><input type="number" className="w-full text-sm border-0 outline-none bg-transparent text-right" value={it.valor} step="0.01" min={0} onChange={e=>setItem(i,'valor',e.target.value)}/></td>
                       <td className="px-3 py-1 font-bold text-slate-700 text-right text-sm">{((Number(it.qtd)||0)*(Number(it.valor)||0)).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
-                      <td className="px-2 py-1 text-center">
-                        <button type="button" onClick={()=>removeItem(i)} className="text-red-400 hover:text-red-600 p-1 rounded hover:bg-red-50 transition-colors"><X size={14}/></button>
-                      </td>
+                      <td className="px-2 py-1 text-center"><button type="button" onClick={()=>removeItem(i)} className="text-red-400 hover:text-red-600 p-1 rounded hover:bg-red-50 transition-colors"><X size={14}/></button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -431,92 +363,43 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
             </div>
             <div className="flex items-center justify-between mt-3">
               <button type="button" onClick={addItem} className="bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-800 transition-colors">+ Adicionar Novo Item</button>
-              <div className="bg-blue-50 border border-blue-200 rounded-lg px-5 py-2.5 font-bold text-blue-900 text-base">
-                TOTAL GERAL:&nbsp;{totalGeral.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}
-              </div>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg px-5 py-2.5 font-bold text-blue-900 text-base">TOTAL GERAL:&nbsp;{totalGeral.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</div>
             </div>
           </Section>
-
-          {/* Observações */}
           <Section title="Observações Gerais" defaultOpen={false}>
             <textarea className={`${inp} min-h-[80px]`} rows={3} value={form.observacoes} onChange={e=>set('observacoes',e.target.value)} placeholder="Descreva observações técnicas ou comerciais adicionais..."/>
             <p className="text-xs text-slate-400 italic mt-1">*Se deixado em branco, não aparecerá na proposta final.</p>
           </Section>
-
-          {/* Condições Gerais */}
           <Section title="Condições Gerais e Escopo" defaultOpen={false}>
             <div className="space-y-5">
-              <Field label="Reajuste">
-                <textarea className={`${inp} min-h-[55px]`} rows={2} value={form.reajuste} onChange={e=>set('reajuste',e.target.value)}/>
-              </Field>
-
+              <Field label="Reajuste"><textarea className={`${inp} min-h-[55px]`} rows={2} value={form.reajuste} onChange={e=>set('reajuste',e.target.value)}/></Field>
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-2 uppercase tracking-wide">Tributos e Encargos Fiscais</label>
                 <div className="grid grid-cols-2 gap-3 bg-blue-50 p-4 rounded-lg border border-blue-200">
                   {[{chk:'icms',val:'icms_val',label:'ICMS (%)'},{chk:'ipi',val:'ipi_val',label:'IPI (%)'},{chk:'pis',val:'pis_val',label:'PIS (%)'},{chk:'cofins',val:'cofins_val',label:'COFINS (%)'},{chk:'iss',val:'iss_val',label:'ISS (%)'}].map(({chk,val,label})=>(
                     <div key={chk} className="bg-white rounded-lg p-3 border border-slate-200 flex flex-col gap-2">
-                      <label className="flex items-center gap-2 text-sm cursor-pointer">
-                        <input type="checkbox" className="accent-blue-600" checked={!!form.impostos[chk]} onChange={e=>setImp(chk,e.target.checked)}/>
-                        <span className="font-medium text-slate-700">{label}</span>
-                      </label>
+                      <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" className="accent-blue-600" checked={!!form.impostos[chk]} onChange={e=>setImp(chk,e.target.checked)}/><span className="font-medium text-slate-700">{label}</span></label>
                       <input className={inp} value={form.impostos[val]} onChange={e=>setImp(val,e.target.value)} placeholder="0"/>
                     </div>
                   ))}
-                  <div className="bg-white rounded-lg p-3 border border-slate-200 flex flex-col gap-2">
-                    <label className="text-sm font-medium text-slate-700">NCM</label>
-                    <input className={inp} value={form.impostos.ncm} onChange={e=>setImp('ncm',e.target.value)}/>
-                  </div>
-                  <div className="bg-white rounded-lg p-3 border border-slate-200 flex flex-col gap-2 col-span-2">
-                    <label className="text-sm font-medium text-slate-700">Código do Serviço</label>
-                    <input className={inp} value={form.impostos.cod_servico} onChange={e=>setImp('cod_servico',e.target.value)} placeholder="Ex: 14.01"/>
-                  </div>
+                  <div className="bg-white rounded-lg p-3 border border-slate-200 flex flex-col gap-2"><label className="text-sm font-medium text-slate-700">NCM</label><input className={inp} value={form.impostos.ncm} onChange={e=>setImp('ncm',e.target.value)}/></div>
+                  <div className="bg-white rounded-lg p-3 border border-slate-200 flex flex-col gap-2 col-span-2"><label className="text-sm font-medium text-slate-700">Código do Serviço</label><input className={inp} value={form.impostos.cod_servico} onChange={e=>setImp('cod_servico',e.target.value)} placeholder="Ex: 14.01"/></div>
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Condições de Pagamento">
-                  <select className={sel} value={form.pagamento} onChange={e=>set('pagamento',e.target.value)}>
-                    {PAGAMENTO_OPTS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                  {form.pagamento==='OUTRO'&&(
-                    <input className={`${inp} mt-2`} value={form.pagamento_personalizado} onChange={e=>set('pagamento_personalizado',e.target.value)} placeholder="Descreva a condição de pagamento"/>
-                  )}
+                  <select className={sel} value={form.pagamento} onChange={e=>set('pagamento',e.target.value)}>{PAGAMENTO_OPTS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select>
+                  {form.pagamento==='OUTRO'&&(<input className={`${inp} mt-2`} value={form.pagamento_personalizado} onChange={e=>set('pagamento_personalizado',e.target.value)} placeholder="Descreva a condição de pagamento"/>)}
                 </Field>
-                <Field label="Validade da Proposta Comercial">
-                  <input className={inp} value={form.validade_texto} onChange={e=>set('validade_texto',e.target.value)}/>
-                </Field>
-                <Field label="Prazo de Entrega e Capacidade Produtiva" full>
-                  <input className={inp} value={form.prazo_entrega} onChange={e=>set('prazo_entrega',e.target.value)}/>
-                </Field>
+                <Field label="Validade da Proposta Comercial"><input className={inp} value={form.validade_texto} onChange={e=>set('validade_texto',e.target.value)}/></Field>
+                <Field label="Prazo de Entrega e Capacidade Produtiva" full><input className={inp} value={form.prazo_entrega} onChange={e=>set('prazo_entrega',e.target.value)}/></Field>
               </div>
-
-              <Field label="Garantia">
-                <textarea className={`${inp} min-h-[90px]`} rows={4} value={form.garantia} onChange={e=>set('garantia',e.target.value)}/>
-                <p className="text-xs text-slate-400 italic mt-1">*Se deixado em branco, não aparecerá na proposta final.</p>
-              </Field>
-              <Field label="Escopo de Fornecimento">
-                <CheckGroup options={ESCOPO_OPTS} selected={form.escopo} onToggle={v=>toggleCheck('escopo',v)}
-                  extras={form.escopo_extra} onAddExtra={()=>addExtra('escopo_extra')}
-                  onRemoveExtra={i=>removeExtra('escopo_extra',i)} onChangeExtra={(i,v)=>changeExtra('escopo_extra',i,v)}/>
-              </Field>
-              <Field label="Fora de Escopo / Escopo Contratante">
-                <CheckGroup options={FORA_ESCOPO_OPTS} selected={form.fora_escopo} onToggle={v=>toggleCheck('fora_escopo',v)}
-                  extras={form.fora_escopo_extra} onAddExtra={()=>addExtra('fora_escopo_extra')}
-                  onRemoveExtra={i=>removeExtra('fora_escopo_extra',i)} onChangeExtra={(i,v)=>changeExtra('fora_escopo_extra',i,v)}/>
-              </Field>
-              <Field label="Ensaios Não Destrutivos">
-                <input className={inp} value={form.ensaios} onChange={e=>set('ensaios',e.target.value)}/>
-              </Field>
-              <Field label="Tratamento Anticorrosivo">
-                <CheckGroup options={TRATAMENTO_OPTS} selected={form.tratamento} onToggle={v=>toggleCheck('tratamento',v)}
-                  extras={form.tratamento_extra} onAddExtra={()=>addExtra('tratamento_extra')}
-                  onRemoveExtra={i=>removeExtra('tratamento_extra',i)} onChangeExtra={(i,v)=>changeExtra('tratamento_extra',i,v)}/>
-              </Field>
-              <Field label="Data Book Técnico">
-                <CheckGroup options={DATABOOK_OPTS} selected={form.databook} onToggle={v=>toggleCheck('databook',v)}
-                  extras={form.databook_extra} onAddExtra={()=>addExtra('databook_extra')}
-                  onRemoveExtra={i=>removeExtra('databook_extra',i)} onChangeExtra={(i,v)=>changeExtra('databook_extra',i,v)}/>
-              </Field>
+              <Field label="Garantia"><textarea className={`${inp} min-h-[90px]`} rows={4} value={form.garantia} onChange={e=>set('garantia',e.target.value)}/><p className="text-xs text-slate-400 italic mt-1">*Se deixado em branco, não aparecerá na proposta final.</p></Field>
+              <Field label="Escopo de Fornecimento"><CheckGroup options={ESCOPO_OPTS} selected={form.escopo} onToggle={v=>toggleCheck('escopo',v)} extras={form.escopo_extra} onAddExtra={()=>addExtra('escopo_extra')} onRemoveExtra={i=>removeExtra('escopo_extra',i)} onChangeExtra={(i,v)=>changeExtra('escopo_extra',i,v)}/></Field>
+              <Field label="Fora de Escopo / Escopo Contratante"><CheckGroup options={FORA_ESCOPO_OPTS} selected={form.fora_escopo} onToggle={v=>toggleCheck('fora_escopo',v)} extras={form.fora_escopo_extra} onAddExtra={()=>addExtra('fora_escopo_extra')} onRemoveExtra={i=>removeExtra('fora_escopo_extra',i)} onChangeExtra={(i,v)=>changeExtra('fora_escopo_extra',i,v)}/></Field>
+              <Field label="Ensaios Não Destrutivos"><input className={inp} value={form.ensaios} onChange={e=>set('ensaios',e.target.value)}/></Field>
+              <Field label="Tratamento Anticorrosivo"><CheckGroup options={TRATAMENTO_OPTS} selected={form.tratamento} onToggle={v=>toggleCheck('tratamento',v)} extras={form.tratamento_extra} onAddExtra={()=>addExtra('tratamento_extra')} onRemoveExtra={i=>removeExtra('tratamento_extra',i)} onChangeExtra={(i,v)=>changeExtra('tratamento_extra',i,v)}/></Field>
+              <Field label="Data Book Técnico"><CheckGroup options={DATABOOK_OPTS} selected={form.databook} onToggle={v=>toggleCheck('databook',v)} extras={form.databook_extra} onAddExtra={()=>addExtra('databook_extra')} onRemoveExtra={i=>removeExtra('databook_extra',i)} onChangeExtra={(i,v)=>changeExtra('databook_extra',i,v)}/></Field>
               <Field label="Condições de Transporte e Logística">
                 <select className={`${sel} mb-2`} value={form.transporte_tipo} onChange={e=>set('transporte_tipo',e.target.value)}>
                   <option value="CIF">CIF – Frete e seguro sob responsabilidade da Carbat</option>
@@ -529,36 +412,20 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
               <Field label="Documentos de Referência Recebidos">
                 <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
                   {form.documentos.length===0&&<p className="text-slate-400 text-sm italic text-center py-3">Nenhum documento adicionado ainda.</p>}
-                  <div className="space-y-2">
-                    {form.documentos.map((doc,i)=>(
-                      <div key={i} className="flex gap-2 items-center">
-                        <input className={inp} value={doc} onChange={e=>setDoc(i,e.target.value)} placeholder="Ex: Projeto Executivo Rev.02"/>
-                        <button type="button" onClick={()=>removeDoc(i)} className="text-red-500 hover:text-red-700 p-1 flex-shrink-0"><X size={14}/></button>
-                      </div>
-                    ))}
-                  </div>
+                  <div className="space-y-2">{form.documentos.map((doc,i)=>(<div key={i} className="flex gap-2 items-center"><input className={inp} value={doc} onChange={e=>setDoc(i,e.target.value)} placeholder="Ex: Projeto Executivo Rev.02"/><button type="button" onClick={()=>removeDoc(i)} className="text-red-500 hover:text-red-700 p-1 flex-shrink-0"><X size={14}/></button></div>))}</div>
                   <button type="button" onClick={addDoc} className="mt-3 text-xs bg-slate-500 text-white px-3 py-1.5 rounded hover:bg-slate-600">+ Adicionar Documento</button>
                   <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-200 mt-4">
-                    <div>
-                      <label className="text-xs text-slate-500 mb-1 block">Enviado por:</label>
-                      <input className={inp} value={form.documentos_enviado_por} onChange={e=>set('documentos_enviado_por',e.target.value)} placeholder="Ex: contato@empresa.com"/>
-                    </div>
-                    <div>
-                      <label className="text-xs text-slate-500 mb-1 block">Data de Recebimento:</label>
-                      <input type="date" className={inp} value={form.documentos_data} onChange={e=>set('documentos_data',e.target.value)}/>
-                    </div>
+                    <div><label className="text-xs text-slate-500 mb-1 block">Enviado por:</label><input className={inp} value={form.documentos_enviado_por} onChange={e=>set('documentos_enviado_por',e.target.value)} placeholder="Ex: contato@empresa.com"/></div>
+                    <div><label className="text-xs text-slate-500 mb-1 block">Data de Recebimento:</label><input type="date" className={inp} value={form.documentos_data} onChange={e=>set('documentos_data',e.target.value)}/></div>
                   </div>
                 </div>
               </Field>
             </div>
           </Section>
         </div>
-
-        {/* footer */}
         <div className="flex justify-end gap-3 p-5 border-t bg-slate-50 rounded-b-2xl sticky bottom-0">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100 transition-colors">Cancelar</button>
-          <button type="button" onClick={save} disabled={saving || clienteAtualReprovado}
-            className="px-6 py-2 text-sm rounded-lg bg-blue-700 text-white font-bold hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors uppercase tracking-wide">
+          <button type="button" onClick={save} disabled={saving} className="px-6 py-2 text-sm rounded-lg bg-blue-700 text-white font-bold hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors uppercase tracking-wide">
             {saving?'Salvando...':isEdit?`Salvar (Rev. ${nextRev})`:'Criar Proposta'}
           </button>
         </div>
@@ -567,13 +434,24 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
   )
 }
 
-// ─── page ─────────────────────────────────────────────────────────────────────
 export default function PropostasPage() {
   const [propostas, setPropostas] = useState([])
   const [clientes,  setClientes]  = useState([])
   const [loading,   setLoading]   = useState(true)
   const [search,    setSearch]    = useState('')
   const [modal,     setModal]     = useState(null)
+
+  // ── filtros ──────────────────────────────────────────────────────────────────
+  const [filtroContratante, setFiltroContratante] = useState('')
+  const [filtroReferencia,  setFiltroReferencia]  = useState('')
+  const [filtroTitulo,      setFiltroTitulo]      = useState('')
+  const [filtrosAbertos,    setFiltrosAbertos]    = useState(false)
+
+  const temFiltroAtivo = filtroContratante || filtroReferencia || filtroTitulo
+
+  const limparFiltros = () => {
+    setFiltroContratante(''); setFiltroReferencia(''); setFiltroTitulo(''); setSearch('')
+  }
 
   const load = async () => {
     const [p,c] = await Promise.all([api.propostas.list(), api.clientes.list()])
@@ -582,20 +460,15 @@ export default function PropostasPage() {
   useEffect(()=>{ load() },[])
 
   const openNew = () => {
-    const clientesAprovados = clientes.filter(c => c.aprovado === true)
-    if (clientesAprovados.length === 0) {
-      return alert('Não há clientes aprovados. Acesse a tela de Clientes e aprove um cliente antes de criar uma proposta.')
-    }
-    setModal({ mode:'new', form:{ ...EMPTY_FORM, data_proposta:new Date().toISOString().split('T')[0] } })
+    const proximoNumero = gerarProximoNumero(propostas)
+    setModal({ mode:'new', form:{ ...EMPTY_FORM, numero: proximoNumero, data_proposta:new Date().toISOString().split('T')[0] } })
   }
-
   const openEdit = (p) => setModal({ mode:'edit', id:p.id, form:buildForm(p) })
   const close    = () => setModal(null)
   const del = async (id) => {
     if (!confirm('Excluir esta proposta?')) return
     await api.propostas.delete(id); load()
   }
-
   const updateStatus = async (proposta, novoStatus) => {
     try {
       await api.propostas.update(proposta.id, { ...proposta, status: novoStatus })
@@ -603,15 +476,23 @@ export default function PropostasPage() {
     } catch(e) { alert(e.message) }
   }
 
-  const filtered = propostas.filter(p=>
-    (p.titulo+p.cliente_nome+p.numero+p.status).toLowerCase().includes(search.toLowerCase())
-  )
+  // ── filtragem combinada ───────────────────────────────────────────────────────
+  const filtered = propostas.filter(p => {
+    const q = search.toLowerCase()
+    const matchSearch      = !q || (p.titulo+p.cliente_nome+p.numero+p.status).toLowerCase().includes(q)
+    const matchContratante = !filtroContratante || (p.cliente_nome||'').toLowerCase().includes(filtroContratante.toLowerCase())
+    const matchReferencia  = !filtroReferencia  || (p.referencia||'').toLowerCase().includes(filtroReferencia.toLowerCase())
+    const matchTitulo      = !filtroTitulo      || (p.titulo||'').toLowerCase().includes(filtroTitulo.toLowerCase())
+    return matchSearch && matchContratante && matchReferencia && matchTitulo
+  })
+
+  const contratantesUnicos = [...new Set(propostas.map(p => p.cliente_nome).filter(Boolean))].sort()
 
   return (
     <div className="p-8">
       <PageHeader
         title="Propostas Comerciais"
-        subtitle={`${propostas.length} proposta${propostas.length!==1?'s':''}`}
+        subtitle={`${filtered.length} de ${propostas.length} proposta${propostas.length!==1?'s':''}`}
         action={
           <button onClick={openNew} className="flex items-center gap-2 bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-800 transition-colors">
             <Plus size={16}/> Nova Proposta
@@ -620,16 +501,73 @@ export default function PropostasPage() {
       />
 
       <Card>
+        {/* barra de busca + botão filtros */}
         <div className="p-4 border-b flex items-center gap-3">
-          <Search size={16} className="text-slate-400"/>
+          <Search size={16} className="text-slate-400 flex-shrink-0"/>
           <input className="flex-1 text-sm outline-none bg-transparent"
-            placeholder="Buscar por título, cliente, número ou status..."
+            placeholder="Busca rápida por título, cliente, número ou status..."
             value={search} onChange={e=>setSearch(e.target.value)}/>
+          <button
+            onClick={() => setFiltrosAbertos(o => !o)}
+            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${
+              temFiltroAtivo ? 'bg-blue-700 text-white border-blue-700' : 'text-slate-500 border-slate-300 hover:bg-slate-50'
+            }`}
+          >
+            <Filter size={13}/>
+            Filtros
+            {temFiltroAtivo && (
+              <span className="bg-white text-blue-700 rounded-full w-4 h-4 flex items-center justify-center text-xs font-bold">
+                {[filtroContratante, filtroReferencia, filtroTitulo].filter(Boolean).length}
+              </span>
+            )}
+          </button>
+          {temFiltroAtivo && (
+            <button onClick={limparFiltros} className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1 transition-colors">
+              <X size={12}/> Limpar
+            </button>
+          )}
         </div>
+
+        {/* painel de filtros */}
+        {filtrosAbertos && (
+          <div className="px-4 py-3 border-b bg-slate-50 grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">Contratante</label>
+              <input
+                list="filtro-contratantes"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Filtrar por empresa..."
+                value={filtroContratante}
+                onChange={e => setFiltroContratante(e.target.value)}
+              />
+              <datalist id="filtro-contratantes">
+                {contratantesUnicos.map(c => <option key={c} value={c}/>)}
+              </datalist>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">Referência</label>
+              <input
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Filtrar por referência..."
+                value={filtroReferencia}
+                onChange={e => setFiltroReferencia(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">Título / Objeto</label>
+              <input
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Filtrar por título..."
+                value={filtroTitulo}
+                onChange={e => setFiltroTitulo(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
 
         {loading ? <Spinner/> : (
           <Table
-            headers={['Número / Rev.','Título','Cliente','Valor Total','Status','Data','']}
+            headers={['Número / Rev.','Título','Cliente','Referência','Valor Total','Status','Data','']}
             empty={filtered.length===0?'Nenhuma proposta encontrada':''}
           >
             {filtered.map(p=>(
@@ -639,49 +577,25 @@ export default function PropostasPage() {
                 </td>
                 <td className="py-3 px-4 font-medium text-slate-800 max-w-xs truncate">{p.titulo}</td>
                 <td className="py-3 px-4 text-slate-600 text-sm">{p.cliente_nome||'—'}</td>
+                <td className="py-3 px-4 text-slate-500 text-xs">{p.referencia||'—'}</td>
                 <td className="py-3 px-4 text-sm font-semibold text-slate-700">{fmt(p.valor_total)}</td>
                 <td className="py-3 px-4">
-                  <select
-                    value={p.status}
-                    onChange={e => updateStatus(p, e.target.value)}
+                  <select value={p.status} onChange={e => updateStatus(p, e.target.value)}
                     style={{
-                      background:
-                        p.status==='aprovada'      ? '#dcfce7' :
-                        p.status==='enviada'       ? '#dbeafe' :
-                        p.status==='em_negociacao' ? '#fef9c3' :
-                        p.status==='perdida'       ? '#fee2e2' :
-                        p.status==='cancelada'     ? '#fee2e2' : '#f1f5f9',
-                      color:
-                        p.status==='aprovada'      ? '#15803d' :
-                        p.status==='enviada'       ? '#1d4ed8' :
-                        p.status==='em_negociacao' ? '#92400e' :
-                        p.status==='perdida'       ? '#b91c1c' :
-                        p.status==='cancelada'     ? '#b91c1c' : '#475569',
+                      background: p.status==='aprovada'?'#dcfce7':p.status==='enviada'?'#dbeafe':p.status==='em_negociacao'?'#fef9c3':p.status==='perdida'?'#fee2e2':p.status==='cancelada'?'#fee2e2':'#f1f5f9',
+                      color: p.status==='aprovada'?'#15803d':p.status==='enviada'?'#1d4ed8':p.status==='em_negociacao'?'#92400e':p.status==='perdida'?'#b91c1c':p.status==='cancelada'?'#b91c1c':'#475569',
                     }}
-                    className="text-xs font-semibold px-2 py-1 rounded-lg border-0 outline-none cursor-pointer transition-all"
-                  >
+                    className="text-xs font-semibold px-2 py-1 rounded-lg border-0 outline-none cursor-pointer transition-all">
                     {STATUS_OPTIONS.map(s => <option key={s} value={s} style={{background:'#fff',color:'#1e293b'}}>{s}</option>)}
                   </select>
                 </td>
                 <td className="py-3 px-4 text-slate-600 text-xs">{fmtDateDisplay(p.data_proposta)}</td>
                 <td className="py-3 px-4">
                   <div className="flex gap-1 justify-end items-center">
-                    <button onClick={()=>gerarPDF(buildForm(p))}
-                      className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 transition-colors" title="Gerar PDF">
-                      <FileText size={14}/>
-                    </button>
-                    <button onClick={()=>gerarDOCX(buildForm(p))}
-                      className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-700 transition-colors" title="Gerar .DOCX">
-                      <FileDown size={14}/>
-                    </button>
-                    <button onClick={()=>openEdit(p)}
-                      className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors" title="Editar">
-                      <Pencil size={14}/>
-                    </button>
-                    <button onClick={()=>del(p.id)}
-                      className="p-1.5 rounded-lg hover:bg-red-50 text-red-400 transition-colors" title="Excluir">
-                      <Trash2 size={14}/>
-                    </button>
+                    <button onClick={()=>gerarPDF(buildForm(p))} className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 transition-colors" title="Gerar PDF"><FileText size={14}/></button>
+                    <button onClick={()=>gerarDOCX(buildForm(p))} className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-700 transition-colors" title="Gerar .DOCX"><FileDown size={14}/></button>
+                    <button onClick={()=>openEdit(p)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors" title="Editar"><Pencil size={14}/></button>
+                    <button onClick={()=>del(p.id)} className="p-1.5 rounded-lg hover:bg-red-50 text-red-400 transition-colors" title="Excluir"><Trash2 size={14}/></button>
                   </div>
                 </td>
               </tr>
