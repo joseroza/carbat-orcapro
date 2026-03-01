@@ -66,7 +66,7 @@ export function textoCarta(tipo) {
 
 // ─── constantes visuais ───────────────────────────────────────────────────────
 
-const LOGO_URL = 'https://carbat.com.br/wp-content/uploads/2024/06/Carbat-logo-sem-fundo--e1746032537163.png'
+const LOGO_URL = '/logo.png'
 const BLUE     = '#1565c0'
 
 const LOGO_W = 160

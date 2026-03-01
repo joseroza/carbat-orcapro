@@ -39,7 +39,7 @@ export default function LoginPage() {
         {/* Logo / cabeçalho */}
         <div className="text-center mb-8">
           <img
-            src="https://carbat.com.br/wp-content/uploads/2024/06/Carbat-logo-sem-fundo--e1746032537163.png"
+            src="/logo.png"
             alt="Carbat"
             className="h-12 object-contain mx-auto mb-4"
           />

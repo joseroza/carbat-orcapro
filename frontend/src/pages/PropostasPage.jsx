@@ -125,7 +125,7 @@ function buildForm(p) {
   const isKnown=knownPag.includes(storedPag)
   return {
     ...EMPTY_FORM,...p,
-    data_proposta:parseDate(p.data_proposta), documentos_data:parseDate(p.documentos_data),
+    documentos_data:parseDate(p.documentos_data),
     impostos:imp,
     pagamento:isKnown?storedPag:'OUTRO', pagamento_personalizado:isKnown?'':storedPag,
     validade_texto:p.validade_texto||EMPTY_FORM.validade_texto,
