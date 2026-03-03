@@ -21,6 +21,14 @@ function safeDate(val) {
   return null;
 }
 
+// Incrementa revisão: 0.0 → 1.0 → 2.0
+function bumpRevisao(rev) {
+  if (!rev) return "1.0";
+  const n = parseFloat(rev);
+  return isNaN(n) ? "1.0" : (Math.floor(n) + 1) + ".0";
+}
+
+// ─── Listar propostas ─────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
     const { rows } = await db.query("SELECT * FROM propostas ORDER BY created_date DESC");
@@ -28,6 +36,7 @@ router.get("/", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Buscar proposta por ID ───────────────────────────────────────────────────
 router.get("/:id", async (req, res) => {
   try {
     const { rows } = await db.query("SELECT * FROM propostas WHERE id=$1", [req.params.id]);
@@ -35,6 +44,67 @@ router.get("/:id", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Listar histórico de revisões de uma proposta ─────────────────────────────
+router.get("/:id/revisoes", async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT id, proposta_id, revisao, criado_por, created_date, snapshot
+       FROM proposta_revisoes
+       WHERE proposta_id = $1
+       ORDER BY created_date DESC`,
+      [req.params.id]
+    );
+    // Descriptografa os campos sensíveis dentro do snapshot
+    const revisoes = rows.map(r => ({
+      ...r,
+      snapshot: decryptProposta(r.snapshot)
+    }));
+    res.json(revisoes);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Gerar nova revisão (somente quando status = 'enviada') ───────────────────
+router.post("/:id/revisao", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const criado_por = req.usuario?.nome || "sistema";
+
+    // Busca proposta atual
+    const { rows: atual } = await db.query("SELECT * FROM propostas WHERE id=$1", [id]);
+    if (!atual[0]) return res.status(404).json({ error: "Proposta não encontrada." });
+
+    const proposta = decryptProposta(formatRow(atual[0]));
+
+    // Só permite gerar revisão se status for 'enviada'
+    if (proposta.status !== "enviada") {
+      return res.status(400).json({ error: "Revisão só pode ser gerada quando o status for 'enviada'." });
+    }
+
+    const revisaoAtual = proposta.revisao || "0.0";
+    const novaRevisao  = bumpRevisao(revisaoAtual);
+
+    // Salva snapshot da versão atual antes de incrementar
+    await db.query(
+      `INSERT INTO proposta_revisoes (proposta_id, revisao, snapshot, criado_por)
+       VALUES ($1, $2, $3, $4)`,
+      [id, revisaoAtual, JSON.stringify(encryptProposta(proposta)), criado_por]
+    );
+
+    // Atualiza revisão da proposta principal
+    const { rows: updated } = await db.query(
+      `UPDATE propostas SET revisao=$1, updated_date=NOW() WHERE id=$2 RETURNING *`,
+      [novaRevisao, id]
+    );
+
+    res.json({
+      proposta: decryptProposta(formatRow(updated[0])),
+      revisao_gerada: revisaoAtual,
+      nova_revisao: novaRevisao,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Criar proposta ───────────────────────────────────────────────────────────
 router.post("/", async (req, res) => {
   try {
     const f = encryptProposta(req.body);
@@ -46,8 +116,8 @@ router.post("/", async (req, res) => {
        tratamento,databook,transporte,documentos,documentos_data,itens)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
        RETURNING *`,
-      [f.numero, f.revisao, f.cliente_id||null, f.cliente_nome, f.contato, f.referencia, f.titulo,
-       f.tipo_fornecimento, f.valor_total||0, f.status||"rascunho",
+      [f.numero, f.revisao || "0.0", f.cliente_id||null, f.cliente_nome, f.contato,
+       f.referencia, f.titulo, f.tipo_fornecimento, f.valor_total||0, f.status||"rascunho",
        safeDate(f.data_proposta), f.validade_texto, pagamento,
        f.prazo_entrega, f.observacoes, f.reajuste, f.impostos, f.garantia,
        f.escopo, f.fora_escopo, f.ensaios, f.tratamento, f.databook,
@@ -58,6 +128,7 @@ router.post("/", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Atualizar proposta ───────────────────────────────────────────────────────
 router.put("/:id", async (req, res) => {
   try {
     const f = encryptProposta(req.body);
@@ -81,6 +152,7 @@ router.put("/:id", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Excluir proposta ─────────────────────────────────────────────────────────
 router.delete("/:id", async (req, res) => {
   try {
     await db.query("DELETE FROM propostas WHERE id=$1", [req.params.id]);

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Plus, Pencil, Trash2, Search, X, ChevronDown, ChevronUp, FileText, FileDown, AlertTriangle, Filter } from 'lucide-react'
+import { Plus, Pencil, Trash2, Search, X, ChevronDown, ChevronUp,
+         FileText, FileDown, AlertTriangle, Filter, History, GitBranch, Eye } from 'lucide-react'
 import { api } from '../api/api'
 import { PageHeader, Card, Table, Spinner, Badge } from '../components/ui'
 import { gerarPDF, gerarDOCX, fmtDateDisplay, buildFilename } from '../utils/gerarProposta'
@@ -99,11 +100,10 @@ function reajusteAtual() {
   return `Preço base: ${meses[now.getMonth()]}/${now.getFullYear()}. Os preços serão reajustados conforme a variação no Índice do Aço – INFOMET, toda vez que ultrapassar 10% de aumento.`
 }
 
-// ── ALTERAÇÃO 1: cliente_nome_fantasia adicionado ao EMPTY_FORM ──
 const EMPTY_FORM = {
-  numero:'',revisao:'1.0',cliente_id:'',cliente_nome:'',cliente_nome_fantasia:'',contato:'',referencia:'',
-  data_proposta:'',titulo:'',tipo_fornecimento:'fornecimento e fabricação',
-  status:'rascunho',valor_total:0,observacoes:'',
+  numero:'', revisao:'0.0', cliente_id:'', cliente_nome:'', cliente_nome_fantasia:'', contato:'', referencia:'',
+  data_proposta:'', titulo:'', tipo_fornecimento:'fornecimento e fabricação',
+  status:'rascunho', valor_total:0, observacoes:'',
   reajuste:reajusteAtual(),
   impostos:{icms:true,icms_val:'17',ipi:false,ipi_val:'',pis:true,pis_val:'0.65',cofins:true,cofins_val:'3.00',iss:false,iss_val:'',ncm:'73089010',cod_servico:''},
   pagamento:'30 DDL, após a emissão da Notas Fiscal.',pagamento_personalizado:'',
@@ -126,7 +126,6 @@ function buildForm(p) {
   const isKnown=knownPag.includes(storedPag)
   return {
     ...EMPTY_FORM,...p,
-    // ── ALTERAÇÃO 2: preserva cliente_nome_fantasia ao carregar proposta ──
     cliente_nome_fantasia: p.cliente_nome_fantasia || '',
     documentos_data:parseDate(p.documentos_data),
     impostos:imp,
@@ -148,10 +147,7 @@ function gerarProximoNumero(propostas) {
   let maxSeq = 0
   for (const p of propostas) {
     const num = parseInt((p.numero || '').replace(/\D/g, ''), 10)
-    if (!isNaN(num) && num > BASE) {
-      const seq = num - BASE
-      if (seq > maxSeq) maxSeq = seq
-    }
+    if (!isNaN(num) && num > BASE) { const seq = num - BASE; if (seq > maxSeq) maxSeq = seq }
   }
   return String(BASE + maxSeq + 1)
 }
@@ -202,11 +198,127 @@ function CheckGroup({ options, selected, onToggle, extras, onAddExtra, onRemoveE
   )
 }
 
+// ─── Modal de Histórico de Revisões ──────────────────────────────────────────
+function HistoricoModal({ proposta, onClose }) {
+  const [revisoes,     setRevisoes]     = useState([])
+  const [loading,      setLoading]      = useState(true)
+  const [visualizando, setVisualizando] = useState(null)
+
+  useEffect(() => {
+    api.propostas.listarRevisoes(proposta.id)
+      .then(data => { setRevisoes(data); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [proposta.id])
+
+  const exportar = (snapshot, tipo) => {
+    const form = buildForm(snapshot)
+    if (tipo === 'pdf')  gerarPDF(form)
+    if (tipo === 'docx') gerarDOCX(form)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between p-5 border-b">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center">
+              <History size={18} className="text-blue-600"/>
+            </div>
+            <div>
+              <h2 className="font-semibold text-slate-800">Histórico de Revisões</h2>
+              <p className="text-xs text-slate-400">{proposta.numero} — {proposta.titulo}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"><X size={20}/></button>
+        </div>
+
+        <div className="px-5 pt-4">
+          <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
+            <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"/>
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-blue-800">
+                Rev. {proposta.revisao}
+                <span className="ml-2 text-xs bg-blue-200 text-blue-700 px-2 py-0.5 rounded-full">atual</span>
+              </p>
+              <p className="text-xs text-blue-600 mt-0.5">Versão em edição — não salva no histórico ainda</p>
+            </div>
+            <div className="flex gap-1">
+              <button onClick={()=>gerarPDF(buildForm(proposta))} className="p-1.5 rounded-lg hover:bg-blue-100 text-red-500 transition-colors" title="Exportar PDF"><FileText size={14}/></button>
+              <button onClick={()=>gerarDOCX(buildForm(proposta))} className="p-1.5 rounded-lg hover:bg-blue-100 text-blue-700 transition-colors" title="Exportar DOCX"><FileDown size={14}/></button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-3">
+          {loading && <div className="flex justify-center py-8"><Spinner/></div>}
+          {!loading && revisoes.length === 0 && (
+            <div className="text-center py-10">
+              <GitBranch size={32} className="text-slate-300 mx-auto mb-3"/>
+              <p className="text-sm text-slate-400">Nenhuma revisão gerada ainda.</p>
+              <p className="text-xs text-slate-400 mt-1">Com o status <strong>enviada</strong>, use o botão <strong>"Gerar Revisão"</strong> no formulário.</p>
+            </div>
+          )}
+          {!loading && revisoes.map((rev) => (
+            <div key={rev.id} className="border border-slate-200 rounded-xl overflow-hidden">
+              <div className="flex items-center gap-3 px-4 py-3 bg-slate-50">
+                <div className="w-2 h-2 rounded-full bg-slate-400 flex-shrink-0"/>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-slate-700">Rev. {rev.revisao}</p>
+                  <p className="text-xs text-slate-400">
+                    {fmtDateDisplay(rev.created_date?.split('T')[0])}
+                    {rev.criado_por && <> · por <strong>{rev.criado_por}</strong></>}
+                  </p>
+                </div>
+                <div className="flex gap-1">
+                  <button onClick={()=>setVisualizando(visualizando?.id===rev.id ? null : rev)}
+                    className={`p-1.5 rounded-lg transition-colors ${visualizando?.id===rev.id?'bg-slate-200 text-slate-700':'hover:bg-slate-200 text-slate-500'}`} title="Ver dados">
+                    <Eye size={14}/>
+                  </button>
+                  <button onClick={()=>exportar(rev.snapshot,'pdf')} className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 transition-colors" title="Exportar PDF"><FileText size={14}/></button>
+                  <button onClick={()=>exportar(rev.snapshot,'docx')} className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-700 transition-colors" title="Exportar DOCX"><FileDown size={14}/></button>
+                </div>
+              </div>
+              {visualizando?.id === rev.id && (
+                <div className="border-t border-slate-200 px-4 py-3 bg-white space-y-1.5 text-xs text-slate-600">
+                  {[
+                    ['Contratante',    rev.snapshot.cliente_nome],
+                    ['A/C',            rev.snapshot.contato],
+                    ['Título / Objeto',rev.snapshot.titulo],
+                    ['Referência',     rev.snapshot.referencia],
+                    ['Data',           fmtDateDisplay(rev.snapshot.data_proposta)],
+                    ['Nº Proposta',    rev.snapshot.numero],
+                    ['Status',         rev.snapshot.status],
+                    ['Valor Total',    fmt(rev.snapshot.valor_total)],
+                    ['Tipo Fornec.',   rev.snapshot.tipo_fornecimento],
+                  ].map(([label, val]) => val ? (
+                    <div key={label} className="flex gap-2">
+                      <span className="font-semibold text-slate-500 w-32 flex-shrink-0">{label}:</span>
+                      <span>{val}</span>
+                    </div>
+                  ) : null)}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="p-4 border-t bg-slate-50 rounded-b-2xl">
+          <button onClick={onClose} className="w-full px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100 transition-colors">Fechar</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Modal principal ──────────────────────────────────────────────────────────
 function PropostaModal({ modal, clientes, onClose, onSaved }) {
-  const [form, setForm]     = useState(modal.form)
-  const [saving, setSaving] = useState(false)
+  const [form, setForm]             = useState(modal.form)
+  const [saving, setSaving]         = useState(false)
+  const [gerandoRev, setGerandoRev] = useState(false)
   const isEdit = modal.mode === 'edit'
+
   const clientesDisponiveis = clientes.filter(c => c.aprovado === true || c.aprovado === false)
+
   const set    = (k,v) => setForm(f=>({...f,[k]:v}))
   const setImp = (k,v) => setForm(f=>({...f,impostos:{...f.impostos,[k]:v}}))
   const toggleCheck = (field,val) => setForm(f=>({...f,[field]:f[field].includes(val)?f[field].filter(x=>x!==val):[...f[field],val]}))
@@ -220,7 +332,6 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
   const removeDoc  = (i) => setForm(f=>({...f,documentos:f.documentos.filter((_,idx)=>idx!==i)}))
   const setDoc     = (i,v) => setForm(f=>({...f,documentos:f.documentos.map((x,idx)=>idx===i?v:x)}))
 
-  // ── ALTERAÇÃO 3: popula cliente_nome_fantasia ao selecionar cliente ──
   const handleClienteChange = (digitado) => {
     const cliente = clientesDisponiveis.find(c => c.razao_social === digitado)
     if (cliente) {
@@ -240,41 +351,61 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
 
   function serializeImpostos(imp) {
     const parts=[]
-    if(imp.icms)   parts.push(`• ICMS: ${imp.icms_val}%`)
-    if(imp.ipi)    parts.push(`• IPI: ${imp.ipi_val}%`)
-    if(imp.pis)    parts.push(`• PIS: ${imp.pis_val}% (Incluso)`)
-    if(imp.cofins) parts.push(`• COFINS: ${imp.cofins_val}% (Incluso)`)
-    if(imp.iss)    parts.push(`• ISS: ${imp.iss_val}`)
-    if(imp.ncm)    parts.push(`• NCM: ${imp.ncm}`)
+    if(imp.icms)        parts.push(`• ICMS: ${imp.icms_val}%`)
+    if(imp.ipi)         parts.push(`• IPI: ${imp.ipi_val}%`)
+    if(imp.pis)         parts.push(`• PIS: ${imp.pis_val}% (Incluso)`)
+    if(imp.cofins)      parts.push(`• COFINS: ${imp.cofins_val}% (Incluso)`)
+    if(imp.iss)         parts.push(`• ISS: ${imp.iss_val}`)
+    if(imp.ncm)         parts.push(`• NCM: ${imp.ncm}`)
     if(imp.cod_servico) parts.push(`• Cód. Serviço: ${imp.cod_servico}`)
     return parts.join('\n')
   }
+
+  function buildPayload() {
+    return {
+      ...form,
+      valor_total: Number(form.valor_total)||0,
+      impostos: serializeImpostos(form.impostos),
+      condicoes_pagamento: form.pagamento==='OUTRO' ? form.pagamento_personalizado : form.pagamento,
+      escopo:      arrToText([...form.escopo,      ...form.escopo_extra]),
+      fora_escopo: arrToText([...form.fora_escopo, ...form.fora_escopo_extra]),
+      tratamento:  arrToText([...form.tratamento,  ...form.tratamento_extra]),
+      databook:    arrToText([...form.databook,    ...form.databook_extra]),
+      transporte:  form.transporte_tipo+'\nLocal: '+form.transporte_local,
+      documentos:  form.documentos.filter(Boolean).join('\n')+(form.documentos_enviado_por?`\n\nEnviados por ${form.documentos_enviado_por}, no dia ${fmtDateDisplay(form.documentos_data)}.`:''),
+      itens: form.itens.filter(it=>it.descricao.trim()),
+    }
+  }
+
   const save = async () => {
     if (!form.titulo.trim()) return alert('Título é obrigatório')
     setSaving(true)
     try {
-      const revisao = isEdit ? bumpRevisao(form.revisao) : form.revisao
-      const payload = {
-        ...form, revisao, valor_total:Number(form.valor_total)||0,
-        impostos:serializeImpostos(form.impostos),
-        condicoes_pagamento:form.pagamento==='OUTRO'?form.pagamento_personalizado:form.pagamento,
-        escopo:      arrToText([...form.escopo,      ...form.escopo_extra]),
-        fora_escopo: arrToText([...form.fora_escopo, ...form.fora_escopo_extra]),
-        tratamento:  arrToText([...form.tratamento,  ...form.tratamento_extra]),
-        databook:    arrToText([...form.databook,    ...form.databook_extra]),
-        transporte:  form.transporte_tipo+'\nLocal: '+form.transporte_local,
-        documentos:  form.documentos.filter(Boolean).join('\n')+(form.documentos_enviado_por?`\n\nEnviados por ${form.documentos_enviado_por}, no dia ${fmtDateDisplay(form.documentos_data)}.`:''),
-        itens:form.itens.filter(it=>it.descricao.trim()),
-      }
+      const payload = buildPayload()
       if (modal.mode==='new') await api.propostas.create(payload)
-      else                    await api.propostas.update(modal.id,payload)
+      else                    await api.propostas.update(modal.id, payload)
       onSaved()
     } catch(e) { alert(e.message) }
     finally { setSaving(false) }
   }
+
+  const gerarRevisao = async () => {
+    if (!confirm(`Confirma geração da revisão?\n\nA versão atual (Rev. ${form.revisao}) será salva no histórico e a proposta avançará para Rev. ${bumpRevisao(form.revisao)}.`)) return
+    setGerandoRev(true)
+    try {
+      await api.propostas.update(modal.id, buildPayload())
+      const resultado = await api.propostas.gerarRevisao(modal.id)
+      alert(`✅ Revisão gerada!\n\nRev. ${resultado.revisao_gerada} salva no histórico.\nProposta agora em Rev. ${resultado.nova_revisao}.`)
+      onSaved()
+    } catch(e) { alert(e.message) }
+    finally { setGerandoRev(false) }
+  }
+
   const totalGeral = form.itens.reduce((s,it)=>s+(Number(it.qtd)||0)*(Number(it.valor)||0),0)
-  const nextRev    = isEdit ? bumpRevisao(form.revisao) : form.revisao
+  const nextRev    = bumpRevisao(form.revisao)
   const filename   = buildFilename(form)
+  const podeGerarRevisao = isEdit && form.status === 'enviada'
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl my-4">
@@ -283,11 +414,17 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
             <img src="https://carbat.com.br/wp-content/uploads/2024/06/Carbat-logo-sem-fundo--e1746032537163.png" alt="Carbat" className="h-8 object-contain"/>
             <div>
               <h2 className="text-lg font-semibold text-slate-800">{isEdit?'Editar Proposta Comercial':'Nova Proposta Comercial'}</h2>
-              {isEdit&&<p className="text-xs text-amber-600 font-medium">⚠ Ao salvar, a revisão será automaticamente atualizada para Rev. {nextRev}</p>}
+              {isEdit && (
+                <p className="text-xs text-slate-400">
+                  Rev. atual: <strong>{form.revisao}</strong>
+                  {podeGerarRevisao && <span className="ml-2 text-green-600 font-medium">· pronta para revisão</span>}
+                </p>
+              )}
             </div>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"><X size={20}/></button>
         </div>
+
         <div className="p-5">
           <Section title="Cabeçalho da Proposta">
             <div className="grid grid-cols-2 gap-4">
@@ -307,7 +444,7 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
                 <input className={inp} value={form.contato} onChange={e=>set('contato',e.target.value)} placeholder="Nome do responsável"/>
               </Field>
               <Field label="Referência">
-                <input className={inp} value={form.referencia} onChange={e=>set('referencia',e.target.value)} placeholder="Ex: Projeto Arauco"/>
+                <input className={inp} value={form.referencia} onChange={e=>set('referencia',e.target.value)} placeholder="Ex: Arauco — Obra Norte, Contrato 2024-081"/>
               </Field>
               <Field label="Data">
                 <input type="date" className={inp} value={form.data_proposta} onChange={e=>set('data_proposta',e.target.value)}/>
@@ -318,11 +455,12 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
                   <span className="px-3 py-2 text-xs text-slate-400 bg-slate-100 border-l border-slate-200 select-none">automático</span>
                 </div>
               </Field>
-              <Field label="Revisão atual">
-                <input className={`${inp} bg-slate-100 text-slate-500`} value={form.revisao} readOnly title="Incrementada automaticamente ao salvar"/>
+              <Field label="Revisão">
+                <input className={inp} value={form.revisao} onChange={e=>set('revisao',e.target.value)}
+                  placeholder="0.0" title="Editável. Use 'Gerar Revisão' para criar histórico automaticamente."/>
               </Field>
               <Field label="Título / Objeto" required full>
-                <input className={inp} value={form.titulo} onChange={e=>set('titulo',e.target.value)} placeholder="Ex: Fabricação de estrutura metálica"/>
+                <input className={inp} value={form.titulo} onChange={e=>set('titulo',e.target.value)} placeholder="Ex: Fabricação e fornecimento de estrutura metálica"/>
               </Field>
               <Field label="Tipo de Fornecimento" full>
                 <select className={sel} value={form.tipo_fornecimento} onChange={e=>set('tipo_fornecimento',e.target.value)}>
@@ -344,6 +482,7 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
               </div>
             )}
           </Section>
+
           <Section title="1. Itens do Orçamento">
             <div className="overflow-x-auto rounded-lg border border-slate-200">
               <table className="w-full text-sm">
@@ -379,10 +518,12 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
               <div className="bg-blue-50 border border-blue-200 rounded-lg px-5 py-2.5 font-bold text-blue-900 text-base">TOTAL GERAL:&nbsp;{totalGeral.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</div>
             </div>
           </Section>
+
           <Section title="Observações Gerais" defaultOpen={false}>
             <textarea className={`${inp} min-h-[80px]`} rows={3} value={form.observacoes} onChange={e=>set('observacoes',e.target.value)} placeholder="Descreva observações técnicas ou comerciais adicionais..."/>
             <p className="text-xs text-slate-400 italic mt-1">*Se deixado em branco, não aparecerá na proposta final.</p>
           </Section>
+
           <Section title="Condições Gerais e Escopo" defaultOpen={false}>
             <div className="space-y-5">
               <Field label="Reajuste"><textarea className={`${inp} min-h-[55px]`} rows={2} value={form.reajuste} onChange={e=>set('reajuste',e.target.value)}/></Field>
@@ -436,35 +577,51 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
             </div>
           </Section>
         </div>
-        <div className="flex justify-end gap-3 p-5 border-t bg-slate-50 rounded-b-2xl sticky bottom-0">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100 transition-colors">Cancelar</button>
-          <button type="button" onClick={save} disabled={saving} className="px-6 py-2 text-sm rounded-lg bg-blue-700 text-white font-bold hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors uppercase tracking-wide">
-            {saving?'Salvando...':isEdit?`Salvar (Rev. ${nextRev})`:'Criar Proposta'}
-          </button>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between gap-3 p-5 border-t bg-slate-50 rounded-b-2xl sticky bottom-0">
+          <div className="text-xs text-slate-400">
+            {podeGerarRevisao
+              ? <span className="text-green-600 font-medium">✓ Status "enviada" — revisão disponível</span>
+              : isEdit ? <span>Mude o status para <strong>enviada</strong> para liberar revisão</span> : null
+            }
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100 transition-colors">Cancelar</button>
+            {podeGerarRevisao && (
+              <button type="button" onClick={gerarRevisao} disabled={gerandoRev}
+                className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white font-bold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors uppercase tracking-wide">
+                <GitBranch size={15}/>
+                {gerandoRev ? 'Gerando...' : `Gerar Rev. ${nextRev}`}
+              </button>
+            )}
+            <button type="button" onClick={save} disabled={saving}
+              className="px-6 py-2 text-sm rounded-lg bg-blue-700 text-white font-bold hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors uppercase tracking-wide">
+              {saving ? 'Salvando...' : isEdit ? 'Salvar' : 'Criar Proposta'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
   )
 }
 
+// ─── Página principal ─────────────────────────────────────────────────────────
 export default function PropostasPage() {
   const [propostas, setPropostas] = useState([])
   const [clientes,  setClientes]  = useState([])
   const [loading,   setLoading]   = useState(true)
   const [search,    setSearch]    = useState('')
   const [modal,     setModal]     = useState(null)
+  const [historico, setHistorico] = useState(null)
 
-  // ── filtros ──────────────────────────────────────────────────────────────────
   const [filtroContratante, setFiltroContratante] = useState('')
   const [filtroReferencia,  setFiltroReferencia]  = useState('')
   const [filtroTitulo,      setFiltroTitulo]      = useState('')
   const [filtrosAbertos,    setFiltrosAbertos]    = useState(false)
 
   const temFiltroAtivo = filtroContratante || filtroReferencia || filtroTitulo
-
-  const limparFiltros = () => {
-    setFiltroContratante(''); setFiltroReferencia(''); setFiltroTitulo(''); setSearch('')
-  }
+  const limparFiltros  = () => { setFiltroContratante(''); setFiltroReferencia(''); setFiltroTitulo(''); setSearch('') }
 
   const load = async () => {
     const [p,c] = await Promise.all([api.propostas.list(), api.clientes.list()])
@@ -472,7 +629,7 @@ export default function PropostasPage() {
   }
   useEffect(()=>{ load() },[])
 
-  const openNew = () => {
+  const openNew  = () => {
     const proximoNumero = gerarProximoNumero(propostas)
     setModal({ mode:'new', form:{ ...EMPTY_FORM, numero: proximoNumero, data_proposta:new Date().toISOString().split('T')[0] } })
   }
@@ -489,7 +646,6 @@ export default function PropostasPage() {
     } catch(e) { alert(e.message) }
   }
 
-  // ── filtragem combinada ───────────────────────────────────────────────────────
   const filtered = propostas.filter(p => {
     const q = search.toLowerCase()
     const matchSearch      = !q || (p.titulo+p.cliente_nome+p.numero+p.status).toLowerCase().includes(q)
@@ -519,12 +675,10 @@ export default function PropostasPage() {
           <input className="flex-1 text-sm outline-none bg-transparent"
             placeholder="Busca rápida por título, cliente, número ou status..."
             value={search} onChange={e=>setSearch(e.target.value)}/>
-          <button
-            onClick={() => setFiltrosAbertos(o => !o)}
+          <button onClick={() => setFiltrosAbertos(o => !o)}
             className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${
               temFiltroAtivo ? 'bg-blue-700 text-white border-blue-700' : 'text-slate-500 border-slate-300 hover:bg-slate-50'
-            }`}
-          >
+            }`}>
             <Filter size={13}/>
             Filtros
             {temFiltroAtivo && (
@@ -544,34 +698,20 @@ export default function PropostasPage() {
           <div className="px-4 py-3 border-b bg-slate-50 grid grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">Contratante</label>
-              <input
-                list="filtro-contratantes"
+              <input list="filtro-contratantes"
                 className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Filtrar por empresa..."
-                value={filtroContratante}
-                onChange={e => setFiltroContratante(e.target.value)}
-              />
-              <datalist id="filtro-contratantes">
-                {contratantesUnicos.map(c => <option key={c} value={c}/>)}
-              </datalist>
+                placeholder="Filtrar por empresa..." value={filtroContratante} onChange={e => setFiltroContratante(e.target.value)}/>
+              <datalist id="filtro-contratantes">{contratantesUnicos.map(c => <option key={c} value={c}/>)}</datalist>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">Referência</label>
-              <input
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Filtrar por referência..."
-                value={filtroReferencia}
-                onChange={e => setFiltroReferencia(e.target.value)}
-              />
+              <input className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Filtrar por referência..." value={filtroReferencia} onChange={e => setFiltroReferencia(e.target.value)}/>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">Título / Objeto</label>
-              <input
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Filtrar por título..."
-                value={filtroTitulo}
-                onChange={e => setFiltroTitulo(e.target.value)}
-              />
+              <input className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Filtrar por título..." value={filtroTitulo} onChange={e => setFiltroTitulo(e.target.value)}/>
             </div>
           </div>
         )}
@@ -584,7 +724,7 @@ export default function PropostasPage() {
             {filtered.map(p=>(
               <tr key={p.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
                 <td className="py-3 px-4 text-xs font-mono text-slate-600">
-                  {p.numero||'—'}<span className="ml-1 text-slate-400">Rev.{p.revisao}</span>
+                  {p.numero||'—'}<span className="ml-1 text-slate-400">Rev.{p.revisao||'0.0'}</span>
                 </td>
                 <td className="py-3 px-4 font-medium text-slate-800 max-w-xs truncate">{p.titulo}</td>
                 <td className="py-3 px-4 text-slate-600 text-sm">{p.cliente_nome||'—'}</td>
@@ -603,6 +743,7 @@ export default function PropostasPage() {
                 <td className="py-3 px-4 text-slate-600 text-xs">{fmtDateDisplay(p.data_proposta)}</td>
                 <td className="py-3 px-4">
                   <div className="flex gap-1 justify-end items-center">
+                    <button onClick={()=>setHistorico(p)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors" title="Histórico de revisões"><History size={14}/></button>
                     <button onClick={()=>gerarPDF(buildForm(p))} className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 transition-colors" title="Gerar PDF"><FileText size={14}/></button>
                     <button onClick={()=>gerarDOCX(buildForm(p))} className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-700 transition-colors" title="Gerar .DOCX"><FileDown size={14}/></button>
                     <button onClick={()=>openEdit(p)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors" title="Editar"><Pencil size={14}/></button>
@@ -615,8 +756,11 @@ export default function PropostasPage() {
         )}
       </Card>
 
-      {modal&&(
+      {modal && (
         <PropostaModal modal={modal} clientes={clientes} onClose={close} onSaved={()=>{load();close()}}/>
+      )}
+      {historico && (
+        <HistoricoModal proposta={historico} onClose={()=>setHistorico(null)}/>
       )}
     </div>
   )
