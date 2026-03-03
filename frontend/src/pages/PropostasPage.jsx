@@ -99,8 +99,9 @@ function reajusteAtual() {
   return `Preço base: ${meses[now.getMonth()]}/${now.getFullYear()}. Os preços serão reajustados conforme a variação no Índice do Aço – INFOMET, toda vez que ultrapassar 10% de aumento.`
 }
 
+// ── ALTERAÇÃO 1: cliente_nome_fantasia adicionado ao EMPTY_FORM ──
 const EMPTY_FORM = {
-  numero:'',revisao:'1.0',cliente_id:'',cliente_nome:'',contato:'',referencia:'',
+  numero:'',revisao:'1.0',cliente_id:'',cliente_nome:'',cliente_nome_fantasia:'',contato:'',referencia:'',
   data_proposta:'',titulo:'',tipo_fornecimento:'fornecimento e fabricação',
   status:'rascunho',valor_total:0,observacoes:'',
   reajuste:reajusteAtual(),
@@ -125,6 +126,8 @@ function buildForm(p) {
   const isKnown=knownPag.includes(storedPag)
   return {
     ...EMPTY_FORM,...p,
+    // ── ALTERAÇÃO 2: preserva cliente_nome_fantasia ao carregar proposta ──
+    cliente_nome_fantasia: p.cliente_nome_fantasia || '',
     documentos_data:parseDate(p.documentos_data),
     impostos:imp,
     pagamento:isKnown?storedPag:'OUTRO', pagamento_personalizado:isKnown?'':storedPag,
@@ -216,15 +219,25 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
   const addDoc     = () => setForm(f=>({...f,documentos:[...f.documentos,'']}))
   const removeDoc  = (i) => setForm(f=>({...f,documentos:f.documentos.filter((_,idx)=>idx!==i)}))
   const setDoc     = (i,v) => setForm(f=>({...f,documentos:f.documentos.map((x,idx)=>idx===i?v:x)}))
+
+  // ── ALTERAÇÃO 3: popula cliente_nome_fantasia ao selecionar cliente ──
   const handleClienteChange = (digitado) => {
     const cliente = clientesDisponiveis.find(c => c.razao_social === digitado)
     if (cliente) {
       const reprovado = cliente.aprovado === false
-      setForm(f => ({ ...f, cliente_id: cliente.id, cliente_nome: cliente.razao_social, contato: cliente.contato_principal || f.contato, pagamento: reprovado ? 'PIX' : f.pagamento }))
+      setForm(f => ({
+        ...f,
+        cliente_id: cliente.id,
+        cliente_nome: cliente.razao_social,
+        cliente_nome_fantasia: cliente.nome_fantasia || '',
+        contato: cliente.contato_principal || f.contato,
+        pagamento: reprovado ? 'PIX' : f.pagamento
+      }))
     } else {
-      setForm(f => ({ ...f, cliente_nome: digitado, cliente_id: '' }))
+      setForm(f => ({ ...f, cliente_nome: digitado, cliente_id: '', cliente_nome_fantasia: '' }))
     }
   }
+
   function serializeImpostos(imp) {
     const parts=[]
     if(imp.icms)   parts.push(`• ICMS: ${imp.icms_val}%`)
@@ -501,7 +514,6 @@ export default function PropostasPage() {
       />
 
       <Card>
-        {/* barra de busca + botão filtros */}
         <div className="p-4 border-b flex items-center gap-3">
           <Search size={16} className="text-slate-400 flex-shrink-0"/>
           <input className="flex-1 text-sm outline-none bg-transparent"
@@ -528,7 +540,6 @@ export default function PropostasPage() {
           )}
         </div>
 
-        {/* painel de filtros */}
         {filtrosAbertos && (
           <div className="px-4 py-3 border-b bg-slate-50 grid grid-cols-3 gap-3">
             <div>
