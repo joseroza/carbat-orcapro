@@ -5,8 +5,9 @@ import { api } from '../api/api'
 import { PageHeader, Card, Table, Spinner, Badge } from '../components/ui'
 import { gerarPDF, gerarDOCX, fmtDateDisplay, buildFilename } from '../utils/gerarProposta'
 
-const STATUS_OPTIONS = ['rascunho', 'enviada', 'em_negociacao', 'aprovada', 'perdida', 'cancelada']
-const STATUS_COLOR   = { rascunho: 'gray', enviada: 'blue', em_negociacao: 'yellow', aprovada: 'green', perdida: 'red', cancelada: 'red' }
+// ── ALTERAÇÃO 1: status reduzidos ──
+const STATUS_OPTIONS = ['rascunho', 'enviada', 'aprovada', 'fechada']
+const STATUS_COLOR   = { rascunho: 'gray', enviada: 'blue', aprovada: 'green', fechada: 'purple' }
 const fmt = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 function parseDate(val) {
@@ -17,9 +18,9 @@ function parseDate(val) {
   return ''
 }
 function bumpRevisao(rev) {
-  if (!rev) return '2.0'
+  if (!rev && rev !== 0) return '1'
   const n = parseFloat(rev)
-  return isNaN(n) ? rev+'.1' : (Math.floor(n)+1)+'.0'
+  return isNaN(n) ? '1' : String(Math.floor(n) + 1)
 }
 function arrToText(arr) { return (arr||[]).filter(Boolean).join('\n') }
 function textToArr(text, knownOpts) {
@@ -101,7 +102,7 @@ function reajusteAtual() {
 }
 
 const EMPTY_FORM = {
-  numero:'', revisao:'0.0', cliente_id:'', cliente_nome:'', cliente_nome_fantasia:'', contato:'', referencia:'',
+  numero:'', revisao:'0', cliente_id:'', cliente_nome:'', cliente_nome_fantasia:'', contato:'', referencia:'',
   data_proposta:'', titulo:'', tipo_fornecimento:'fornecimento e fabricação',
   status:'rascunho', valor_total:0, observacoes:'',
   reajuste:reajusteAtual(),
@@ -124,8 +125,11 @@ function buildForm(p) {
   const knownPag=PAGAMENTO_OPTS.map(o=>o.value).filter(v=>v!=='OUTRO')
   const storedPag=p.condicoes_pagamento||p.pagamento||EMPTY_FORM.pagamento
   const isKnown=knownPag.includes(storedPag)
+  // garante status válido para propostas antigas com status removido
+  const statusValido = STATUS_OPTIONS.includes(p.status) ? p.status : 'rascunho'
   return {
     ...EMPTY_FORM,...p,
+    status: statusValido,
     cliente_nome_fantasia: p.cliente_nome_fantasia || '',
     documentos_data:parseDate(p.documentos_data),
     impostos:imp,
@@ -198,7 +202,7 @@ function CheckGroup({ options, selected, onToggle, extras, onAddExtra, onRemoveE
   )
 }
 
-// ─── Modal de Histórico de Revisões ──────────────────────────────────────────
+// ─── Modal Histórico ──────────────────────────────────────────────────────────
 function HistoricoModal({ proposta, onClose }) {
   const [revisoes,     setRevisoes]     = useState([])
   const [loading,      setLoading]      = useState(true)
@@ -243,8 +247,8 @@ function HistoricoModal({ proposta, onClose }) {
               <p className="text-xs text-blue-600 mt-0.5">Versão em edição — não salva no histórico ainda</p>
             </div>
             <div className="flex gap-1">
-              <button onClick={()=>gerarPDF(buildForm(proposta))} className="p-1.5 rounded-lg hover:bg-blue-100 text-red-500 transition-colors" title="Exportar PDF"><FileText size={14}/></button>
-              <button onClick={()=>gerarDOCX(buildForm(proposta))} className="p-1.5 rounded-lg hover:bg-blue-100 text-blue-700 transition-colors" title="Exportar DOCX"><FileDown size={14}/></button>
+              <button onClick={()=>gerarPDF(buildForm(proposta))} className="p-1.5 rounded-lg hover:bg-blue-100 text-red-500" title="PDF"><FileText size={14}/></button>
+              <button onClick={()=>gerarDOCX(buildForm(proposta))} className="p-1.5 rounded-lg hover:bg-blue-100 text-blue-700" title="DOCX"><FileDown size={14}/></button>
             </div>
           </div>
         </div>
@@ -255,7 +259,7 @@ function HistoricoModal({ proposta, onClose }) {
             <div className="text-center py-10">
               <GitBranch size={32} className="text-slate-300 mx-auto mb-3"/>
               <p className="text-sm text-slate-400">Nenhuma revisão gerada ainda.</p>
-              <p className="text-xs text-slate-400 mt-1">Com o status <strong>enviada</strong>, use o botão <strong>"Gerar Revisão"</strong> no formulário.</p>
+              <p className="text-xs text-slate-400 mt-1">Com status <strong>enviada</strong>, use <strong>"Gerar Revisão"</strong> no formulário.</p>
             </div>
           )}
           {!loading && revisoes.map((rev) => (
@@ -274,8 +278,8 @@ function HistoricoModal({ proposta, onClose }) {
                     className={`p-1.5 rounded-lg transition-colors ${visualizando?.id===rev.id?'bg-slate-200 text-slate-700':'hover:bg-slate-200 text-slate-500'}`} title="Ver dados">
                     <Eye size={14}/>
                   </button>
-                  <button onClick={()=>exportar(rev.snapshot,'pdf')} className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 transition-colors" title="Exportar PDF"><FileText size={14}/></button>
-                  <button onClick={()=>exportar(rev.snapshot,'docx')} className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-700 transition-colors" title="Exportar DOCX"><FileDown size={14}/></button>
+                  <button onClick={()=>exportar(rev.snapshot,'pdf')} className="p-1.5 rounded-lg hover:bg-red-50 text-red-500" title="PDF"><FileText size={14}/></button>
+                  <button onClick={()=>exportar(rev.snapshot,'docx')} className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-700" title="DOCX"><FileDown size={14}/></button>
                 </div>
               </div>
               {visualizando?.id === rev.id && (
@@ -408,8 +412,8 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl my-4">
-        <div className="flex items-center justify-between p-5 border-b bg-white rounded-t-2xl sticky top-0 z-10 shadow-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl my-4 flex flex-col" style={{maxHeight:'calc(100vh - 2rem)'}}>
+        <div className="flex items-center justify-between p-5 border-b bg-white rounded-t-2xl flex-shrink-0 shadow-sm">
           <div className="flex items-center gap-3">
             <img src="https://carbat.com.br/wp-content/uploads/2024/06/Carbat-logo-sem-fundo--e1746032537163.png" alt="Carbat" className="h-8 object-contain"/>
             <div>
@@ -425,6 +429,7 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"><X size={20}/></button>
         </div>
 
+        <div className="overflow-y-auto flex-1">
         <div className="p-5">
           <Section title="Cabeçalho da Proposta">
             <div className="grid grid-cols-2 gap-4">
@@ -456,8 +461,7 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
                 </div>
               </Field>
               <Field label="Revisão">
-                <input className={inp} value={form.revisao} onChange={e=>set('revisao',e.target.value)}
-                  placeholder="0.0" title="Editável. Use 'Gerar Revisão' para criar histórico automaticamente."/>
+                <input className={inp} value={form.revisao} onChange={e=>set('revisao',e.target.value)} placeholder="0.0"/>
               </Field>
               <Field label="Título / Objeto" required full>
                 <input className={inp} value={form.titulo} onChange={e=>set('titulo',e.target.value)} placeholder="Ex: Fabricação e fornecimento de estrutura metálica"/>
@@ -577,26 +581,26 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
             </div>
           </Section>
         </div>
+        </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between gap-3 p-5 border-t bg-slate-50 rounded-b-2xl sticky bottom-0">
+        <div className="flex items-center justify-between gap-3 p-5 border-t bg-slate-50 rounded-b-2xl flex-shrink-0">
           <div className="text-xs text-slate-400">
             {podeGerarRevisao
               ? <span className="text-green-600 font-medium">✓ Status "enviada" — revisão disponível</span>
-              : isEdit ? <span>Mude o status para <strong>enviada</strong> para liberar revisão</span> : null
+              : isEdit ? <span>Mude para <strong>enviada</strong> para liberar revisão</span> : null
             }
           </div>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100 transition-colors">Cancelar</button>
             {podeGerarRevisao && (
               <button type="button" onClick={gerarRevisao} disabled={gerandoRev}
-                className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white font-bold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors uppercase tracking-wide">
+                className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white font-bold hover:bg-emerald-700 disabled:opacity-50 transition-colors uppercase tracking-wide">
                 <GitBranch size={15}/>
                 {gerandoRev ? 'Gerando...' : `Gerar Rev. ${nextRev}`}
               </button>
             )}
             <button type="button" onClick={save} disabled={saving}
-              className="px-6 py-2 text-sm rounded-lg bg-blue-700 text-white font-bold hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors uppercase tracking-wide">
+              className="px-6 py-2 text-sm rounded-lg bg-blue-700 text-white font-bold hover:bg-blue-800 disabled:opacity-50 transition-colors uppercase tracking-wide">
               {saving ? 'Salvando...' : isEdit ? 'Salvar' : 'Criar Proposta'}
             </button>
           </div>
@@ -657,6 +661,12 @@ export default function PropostasPage() {
 
   const contratantesUnicos = [...new Set(propostas.map(p => p.cliente_nome).filter(Boolean))].sort()
 
+  // ── cores do select inline na tabela ──
+  const statusStyle = (s) => ({
+    background: s==='aprovada'?'#dcfce7':s==='enviada'?'#dbeafe':s==='fechada'?'#ede9fe':'#f1f5f9',
+    color:      s==='aprovada'?'#15803d':s==='enviada'?'#1d4ed8':s==='fechada'?'#6d28d9':'#475569',
+  })
+
   return (
     <div className="p-8">
       <PageHeader
@@ -679,8 +689,7 @@ export default function PropostasPage() {
             className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${
               temFiltroAtivo ? 'bg-blue-700 text-white border-blue-700' : 'text-slate-500 border-slate-300 hover:bg-slate-50'
             }`}>
-            <Filter size={13}/>
-            Filtros
+            <Filter size={13}/>Filtros
             {temFiltroAtivo && (
               <span className="bg-white text-blue-700 rounded-full w-4 h-4 flex items-center justify-center text-xs font-bold">
                 {[filtroContratante, filtroReferencia, filtroTitulo].filter(Boolean).length}
@@ -731,11 +740,9 @@ export default function PropostasPage() {
                 <td className="py-3 px-4 text-slate-500 text-xs">{p.referencia||'—'}</td>
                 <td className="py-3 px-4 text-sm font-semibold text-slate-700">{fmt(p.valor_total)}</td>
                 <td className="py-3 px-4">
-                  <select value={p.status} onChange={e => updateStatus(p, e.target.value)}
-                    style={{
-                      background: p.status==='aprovada'?'#dcfce7':p.status==='enviada'?'#dbeafe':p.status==='em_negociacao'?'#fef9c3':p.status==='perdida'?'#fee2e2':p.status==='cancelada'?'#fee2e2':'#f1f5f9',
-                      color: p.status==='aprovada'?'#15803d':p.status==='enviada'?'#1d4ed8':p.status==='em_negociacao'?'#92400e':p.status==='perdida'?'#b91c1c':p.status==='cancelada'?'#b91c1c':'#475569',
-                    }}
+                  <select value={STATUS_OPTIONS.includes(p.status) ? p.status : 'rascunho'}
+                    onChange={e => updateStatus(p, e.target.value)}
+                    style={statusStyle(p.status)}
                     className="text-xs font-semibold px-2 py-1 rounded-lg border-0 outline-none cursor-pointer transition-all">
                     {STATUS_OPTIONS.map(s => <option key={s} value={s} style={{background:'#fff',color:'#1e293b'}}>{s}</option>)}
                   </select>
