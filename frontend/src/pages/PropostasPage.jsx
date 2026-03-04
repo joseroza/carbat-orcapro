@@ -121,6 +121,8 @@ function buildForm(p) {
   const escopo=textToArr(p.escopo||'',ESCOPO_OPTS), fora=textToArr(p.fora_escopo||'',FORA_ESCOPO_OPTS)
   const trat=textToArr(p.tratamento||'',TRATAMENTO_OPTS), dbook=textToArr(p.databook||'',DATABOOK_OPTS)
   const trans=parseTransporte(p.transporte), docs=parseDocs(p.documentos)
+  // se docs.data vier vazio mas p.documentos_data existir, usa o do banco
+  if (!docs.data && p.documentos_data) docs.data = parseDate(p.documentos_data)
   const imp=typeof p.impostos==='string'?parseImpostos(p.impostos):(p.impostos||EMPTY_FORM.impostos)
   const knownPag=PAGAMENTO_OPTS.map(o=>o.value).filter(v=>v!=='OUTRO')
   const storedPag=p.condicoes_pagamento||p.pagamento||EMPTY_FORM.pagamento
@@ -131,7 +133,6 @@ function buildForm(p) {
     ...EMPTY_FORM,...p,
     status: statusValido,
     cliente_nome_fantasia: p.cliente_nome_fantasia || '',
-    documentos_data:parseDate(p.documentos_data),
     impostos:imp,
     pagamento:isKnown?storedPag:'OUTRO', pagamento_personalizado:isKnown?'':storedPag,
     validade_texto:p.validade_texto||EMPTY_FORM.validade_texto,
@@ -411,8 +412,8 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
   const podeGerarRevisao = isEdit && form.status === 'enviada'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl my-4 flex flex-col" style={{maxHeight:'calc(100vh - 2rem)'}}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col" style={{height:'calc(100vh - 2rem)', maxHeight:'900px'}}>
         <div className="flex items-center justify-between p-5 border-b bg-white rounded-t-2xl flex-shrink-0 shadow-sm">
           <div className="flex items-center gap-3">
             <img src="https://carbat.com.br/wp-content/uploads/2024/06/Carbat-logo-sem-fundo--e1746032537163.png" alt="Carbat" className="h-8 object-contain"/>
@@ -506,7 +507,7 @@ function PropostaModal({ modal, clientes, onClose, onSaved }) {
                   {form.itens.map((it,i)=>(
                     <tr key={i} className={`border-t border-slate-100 ${i%2===0?'bg-white':'bg-slate-50'}`}>
                       <td className="px-3 py-2 text-center text-slate-400 text-xs">{i+1}</td>
-                      <td className="px-2 py-1"><textarea className="w-full text-sm resize-none border-0 outline-none bg-transparent min-h-[36px] p-1" rows={1} value={it.descricao} placeholder="Descrição do item" onChange={e=>setItem(i,'descricao',e.target.value)}/></td>
+                      <td className="px-2 py-1"><textarea className="w-full text-sm resize-none border-0 outline-none bg-transparent p-1" rows={Math.max(1, (it.descricao||'').split('\n').length, Math.ceil((it.descricao||'').length / 40))} value={it.descricao} placeholder="Descrição do item" onChange={e=>setItem(i,'descricao',e.target.value)}/></td>
                       <td className="px-2 py-1"><input className="w-full text-sm border-0 outline-none bg-transparent text-center" value={it.un} onChange={e=>setItem(i,'un',e.target.value)}/></td>
                       <td className="px-2 py-1"><input type="number" className="w-full text-sm border-0 outline-none bg-transparent text-center" value={it.qtd} min={1} onChange={e=>setItem(i,'qtd',e.target.value)}/></td>
                       <td className="px-2 py-1"><input type="number" className="w-full text-sm border-0 outline-none bg-transparent text-right" value={it.valor} step="0.01" min={0} onChange={e=>setItem(i,'valor',e.target.value)}/></td>

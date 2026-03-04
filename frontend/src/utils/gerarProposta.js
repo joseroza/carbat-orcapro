@@ -2,19 +2,9 @@
  * gerarProposta.js
  * Exportação de Propostas Comerciais – Carbat
  *
- *   gerarPDF(form)   → abre nova aba e dispara impressão
- *   gerarDOCX(form)  → baixa .doc (HTML-Word)
- *
- * Estrutura:
- *   Pág 1       – Carta de apresentação (isolada, com cabeçalho)
- *   Pág 2       – Proposta Comercial (com cabeçalho)
- *   Pág X       – Proposta Técnica (nova página, SEM cabeçalho repetido)
- *
  * Nome do arquivo: N°_NomeFantasia_Titulo_Referencia_Rev
- *   (usa cliente_nome_fantasia no filename; razão social permanece no documento)
+ * Cabeçalho da carta/doc: usa nome_fantasia se preenchido, senão razao_social
  */
-
-// ─── helpers exportados ───────────────────────────────────────────────────────
 
 export function parseDate(val) {
   if (!val) return ''
@@ -35,11 +25,6 @@ export function arrToText(arr) {
   return (arr || []).filter(Boolean).join('\n')
 }
 
-/**
- * buildFilename — usa nome fantasia no arquivo, razão social continua no documento.
- * form.cliente_nome_fantasia  → preenchido ao selecionar cliente (PropostasPage)
- * Fallback: form.cliente_nome (razão social) caso fantasia esteja vazia
- */
 export function buildFilename(form) {
   const clean = (s) => (s || '').trim()
     .replace(/[/\\?%*:|"<>\s]+/g, '_')
@@ -85,19 +70,18 @@ const BLUE     = '#1565c0'
 const LOGO_W   = 160
 const LOGO_H   = 40
 
-// Converte a logo para base64 (necessário para Word, que não carrega URLs relativas)
 async function getLogoBase64() {
   try {
     const resp = await fetch(LOGO_URL)
     const blob = await resp.blob()
     return await new Promise((res, rej) => {
       const r = new FileReader()
-      r.onload  = () => res(r.result)   // "data:image/png;base64,..."
+      r.onload  = () => res(r.result)
       r.onerror = rej
       r.readAsDataURL(blob)
     })
   } catch {
-    return LOGO_URL // fallback: tenta URL normal
+    return LOGO_URL
   }
 }
 
@@ -129,7 +113,6 @@ function _secao(num, titulo, conteudo) {
     </div>`
 }
 
-// Cabeçalho com logo
 function _cabecalho(logoSrc) {
   return `
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px;border-bottom:1px solid #ccc;">
@@ -145,7 +128,6 @@ function _cabecalho(logoSrc) {
     </table>`
 }
 
-// H1 sem quebra (Proposta Comercial)
 function _h1(texto) {
   return `<h1 style="font-size:17px;color:${BLUE};text-align:right;text-transform:uppercase;
                      border-bottom:2px solid ${BLUE};padding-bottom:7px;
@@ -153,7 +135,6 @@ function _h1(texto) {
                      page-break-after:avoid;">${texto}</h1>`
 }
 
-// H1 com page-break antes (Proposta Técnica — nova página, sem cabeçalho)
 function _h1NewPage(texto) {
   return `<h1 style="font-size:17px;color:${BLUE};text-align:right;text-transform:uppercase;
                      border-bottom:2px solid ${BLUE};padding-bottom:7px;
@@ -178,6 +159,9 @@ function _buildContent(form, logoSrc) {
 
   const pagamentoCorrigido = pagamentoFinal.replace(/Notas Fiscal/gi, 'Nota Fiscal')
   const impostos           = impostosToText(form.impostos)
+
+  // documento sempre usa razão social - nome fantasia só vai no nome do arquivo
+  const nomeContratante = form.cliente_nome
 
   const itensRows = (form.itens || []).map((it, i) => {
     const vUnit = Number(it.valor) || 0
@@ -210,18 +194,17 @@ function _buildContent(form, logoSrc) {
   const transporteText = (form.transporte_tipo || '') + (form.transporte_local ? '\nLocal: ' + form.transporte_local : '')
   const validadeCorrigida = (form.validade_texto || '').replace(/\(Trinta\)/g, '(trinta)')
 
-  // ── PÁG 1: Carta — usa razão social (cliente_nome) no documento ───────────
   const carta = `
     ${_cabecalho(logoSrc)}
 
     <div style="background:#fcfcfc;border:1px solid #eee;border-left:4px solid #444;
                 padding:16px 18px;margin-bottom:22px;border-radius:4px;line-height:1.5;">
-      <p style="margin:5px 0;font-size:11px;"><strong style="display:inline-block;width:140px;color:#000;">CONTRATANTE:</strong>${_esc(form.cliente_nome)}</p>
-      <p style="margin:5px 0;font-size:11px;"><strong style="display:inline-block;width:140px;color:#000;">A/C:</strong>${_esc(form.contato)}</p>
-      <p style="margin:5px 0;font-size:11px;"><strong style="display:inline-block;width:140px;color:#000;">REFERÊNCIA:</strong>${_esc(form.referencia)}</p>
-      <p style="margin:5px 0;font-size:11px;"><strong style="display:inline-block;width:140px;color:#000;">TÍTULO:</strong>${_esc(form.titulo)}</p>
-      <p style="margin:5px 0;font-size:11px;"><strong style="display:inline-block;width:140px;color:#000;">DATA:</strong>${fmtDateDisplay(form.data_proposta)}</p>
-      <p style="margin:5px 0;font-size:11px;"><strong style="display:inline-block;width:140px;color:#000;">Nº DA PROPOSTA:</strong>${_esc(form.numero)}&nbsp;&nbsp;<strong>REV:</strong>&nbsp;${_esc(form.revisao)}</p>
+      <p style="margin:5px 0;font-size:11px;line-height:1.8;"><strong style="display:inline-block;width:140px;color:#000;">CONTRATANTE:</strong>${_esc(nomeContratante)}</p>
+      <p style="margin:5px 0;font-size:11px;line-height:1.8;"><strong style="display:inline-block;width:140px;color:#000;">A/C:</strong>${_esc(form.contato)}</p>
+      <p style="margin:5px 0;font-size:11px;line-height:1.8;"><strong style="display:inline-block;width:140px;color:#000;">REFERÊNCIA:</strong>${_esc(form.referencia)}</p>
+      <p style="margin:5px 0;font-size:11px;line-height:1.8;"><strong style="display:inline-block;width:140px;color:#000;">TÍTULO:</strong>${_esc(form.titulo)}</p>
+      <p style="margin:5px 0;font-size:11px;line-height:1.8;"><strong style="display:inline-block;width:140px;color:#000;">DATA:</strong>${fmtDateDisplay(form.data_proposta)}</p>
+      <p style="margin:5px 0;font-size:11px;line-height:1.8;"><strong style="display:inline-block;width:140px;color:#000;">Nº DA PROPOSTA:</strong>${_esc(form.numero)}&nbsp;&nbsp;<strong>REV:</strong>&nbsp;${_esc(form.revisao)}</p>
     </div>
 
     <div style="margin-top:24px;line-height:1.5;font-family:'Segoe UI',Arial,sans-serif;font-size:11px;color:#444;">
@@ -256,7 +239,6 @@ function _buildContent(form, logoSrc) {
       </tr>
     </table>`
 
-  // ── BLOCO CONTÍNUO: Comercial (com cabeçalho) + Técnica (só nova página) ──
   const conteudo = `
     ${_cabecalho(logoSrc)}
     ${_h1('Proposta Comercial')}
